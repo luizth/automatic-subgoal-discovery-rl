@@ -43,11 +43,16 @@ def diverse_density(
     # Calculate diverse density for each state
     dd_values = {}
     for state in all_states:
+        if state == -1:  # Skip terminal state
+            continue
         dd_values[state] = calculate_dd(state, positive_bags, negative_bags)
 
     # Sort states by diverse density
-    sorted_dd = sorted([(state, dd) for state, dd in dd_values.items() if dd > threshold],
-                       key=lambda x: x[1], reverse=True)
+    if threshold > 0:
+        sorted_dd = sorted([(state, dd) for state, dd in dd_values.items() if dd > threshold],
+                           key=lambda x: x[1], reverse=True)
+    else:
+        sorted_dd = sorted(dd_values.items(), key=lambda x: x[1], reverse=True)
 
     return sorted_dd
 
@@ -256,7 +261,7 @@ def calculate_relative_novelty(visit_counts, trajectory, state_index, novelty_la
     # Calculate relative novelty
     return following_novelty / preceding_novelty
 
-def is_subgoal(state, rn_scores, p, q, priors_ratio, costs_ratio, threshold):
+def is_subgoal(state, rn_scores, p, q, priors_ratio, costs_ratio, threshold, return_proportion=False):
     """
     Decide if a state is a subgoal based on its relative novelty scores.
 
@@ -291,6 +296,9 @@ def is_subgoal(state, rn_scores, p, q, priors_ratio, costs_ratio, threshold):
     proportion = n1 / n
     decision_threshold = ln_term1 / ln_term2 + (ln_term3 / (n * ln_term2))
 
+    if return_proportion:
+        return [proportion, decision_threshold]
+
     return proportion > decision_threshold
 
 def relative_novelty(
@@ -302,7 +310,8 @@ def relative_novelty(
     rn_threshold: float = 2.0,  # Relative novelty threshold from paper
     costs_ratio: float = 100.0,  # λ_fa/λ_miss from paper
     priors_ratio: float = 100.0,  # P(N)/P(T) from paper
-    static_filter: Set[int] = None
+    static_filter: Set[int] = None,
+    return_scores: bool = False
 ) -> List[Subgoal]:
     """
     Discover subgoals using the relative novelty algorithm.
@@ -335,6 +344,11 @@ def relative_novelty(
 
         # Count state visits
         for state in trajectory:
+
+            # Skip terminal state
+            if state == -1:
+                continue
+
             if state in visit_counts:
                 visit_counts[state] += 1
             else:
@@ -344,6 +358,10 @@ def relative_novelty(
         for i in range(len(trajectory)):
             state = trajectory[i]
 
+            # Skip terminal state
+            if state == -1:
+                continue
+
             # Skip states in static filter
             if state in static_filter:
                 continue
@@ -352,6 +370,13 @@ def relative_novelty(
             if i >= novelty_lag and i < len(trajectory) - novelty_lag:
                 rn = calculate_relative_novelty(visit_counts, trajectory, i, novelty_lag)
                 rn_scores[state].append(rn)
+
+    if return_scores:
+        # Return the relative novelty scores for all states
+        rn_proportion_scores = {s: 0.0 for s, _ in rn_scores.items()}
+        for state, scores in rn_scores.items():
+            rn_proportion_scores[state] = is_subgoal(state, rn_scores, p, q, priors_ratio, costs_ratio, rn_threshold, return_proportion=True)
+        return rn_proportion_scores
 
     # Identify subgoals using the decision rule
     subgoals = []
@@ -571,7 +596,8 @@ if __name__ == "__main__":
         subgoals = relative_novelty(
             trajectories,
             novelty_lag=7,
-            static_filter=static_filter
+            static_filter=static_filter,
+            return_scores=False
         )
 
         # Print the discovered subgoals
