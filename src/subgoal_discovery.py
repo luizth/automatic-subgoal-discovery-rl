@@ -5,6 +5,10 @@ from collections import defaultdict
 from core import Trajectory, Subgoal
 
 
+# Terminal state in the environment
+TERMINAL_STATE = -1
+
+
 def diverse_density(
     trajectories: List[Trajectory],
     results: List[bool],
@@ -43,8 +47,11 @@ def diverse_density(
     # Calculate diverse density for each state
     dd_values = {}
     for state in all_states:
-        if state == -1:  # Skip terminal state
+
+        # Skip terminal state
+        if state == TERMINAL_STATE:
             continue
+
         dd_values[state] = calculate_dd(state, positive_bags, negative_bags)
 
     # Sort states by diverse density
@@ -346,7 +353,7 @@ def relative_novelty(
         for state in trajectory:
 
             # Skip terminal state
-            if state == -1:
+            if state == TERMINAL_STATE:
                 continue
 
             if state in visit_counts:
@@ -359,7 +366,7 @@ def relative_novelty(
             state = trajectory[i]
 
             # Skip terminal state
-            if state == -1:
+            if state == TERMINAL_STATE:
                 continue
 
             # Skip states in static filter
