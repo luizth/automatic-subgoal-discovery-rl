@@ -22,19 +22,38 @@ def sample(env: gym.Env, agent, number_of_samples: int = 50):
 
 
 if __name__ == "__main__":
+    from argparse import ArgumentParser
     from typing import List
     from core import Option
     from agent import SMDPQLearning
-    from env import TwoRooms, get_primitive_actions_as_options
+    from env import TwoRooms, FourRooms, get_primitive_actions_as_options
 
-    # Create the TwoRooms environment
-    env = TwoRooms(
-        start_state=24,
-        goal_state=68,
-        negative_states_config="default",
-        max_steps=None,
-        sparse_rewards=False
-    )
+    # Parse arguments
+    parser = ArgumentParser(description="Sample trajectories application.")
+    parser.add_argument("--env", type=str, default="TwoRooms", help="Environment to use.")
+    parser.add_argument("--number_of_samples", type=int, default=50, help="Number of samples to collect.")
+
+    args = parser.parse_args()
+
+    # Set the environment based on the argument
+    if args.env == "TwoRooms":
+        env = TwoRooms(
+            start_state=24,
+            goal_state=68,
+            negative_states_config="default",
+            max_steps=None,
+            sparse_rewards=False
+        )
+    elif args.env == "FourRooms":
+        env = FourRooms(
+            start_state=6,
+            goal_state=34,
+            negative_states_config="default",
+            max_steps=None,
+            sparse_rewards=False
+        )
+    else:
+        raise ValueError(f"Unknown environment: {args.env}")
 
     # Get the primitive actions as options
     primitive_options: List[Option] = get_primitive_actions_as_options(env)

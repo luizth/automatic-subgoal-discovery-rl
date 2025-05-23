@@ -32,7 +32,7 @@ class SMDPQLearning:
         self.exploration_decay = exploration_decay
 
         if isinstance(env, NavigationEnv):
-            self.q_table = np.zeros((env.num_states, len(options)))
+            self.q_table = np.zeros((env.observation_space.n, len(options)))
         elif isinstance(env, gym.Env):
             self.q_table = np.zeros((env.observation_space.n, len(options)))
 
@@ -41,7 +41,7 @@ class SMDPQLearning:
         self.env.reset()
         self.options = self.initial_options
         if isinstance(self.env, NavigationEnv):
-            self.q_table = np.zeros((self.env.num_states, len(self.options)))
+            self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
         elif isinstance(self.env, gym.Env):
             self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
         self.exploration_rate = self.initial_exploration_rate
@@ -50,7 +50,7 @@ class SMDPQLearning:
         """Add a new option to the Q-learning agent"""
         self.options.append(option)
         # Expand the Q-table to accommodate the new option
-        self.q_table = np.hstack((self.q_table, np.zeros((self.env.num_states, 1))))
+        self.q_table = np.hstack((self.q_table, np.zeros((self.env.observation_space.n, 1))))
 
     def decay_exploration_rate(self):
         """Decay the exploration rate to gradually shift from exploration to exploitation"""
