@@ -5,14 +5,14 @@ import numpy as np
 import gymnasium as gym
 
 from core import Option
-from env import TwoRooms, get_primitive_actions_as_options
+from env import NavigationEnv, get_primitive_actions_as_options
 
 
 class SMDPQLearning:
 
     def __init__(
             self,
-            env: TwoRooms,
+            env: NavigationEnv,
             options: List[Option],
             learning_rate: float = 0.1,  # Learning rate
             discount_factor: float = 0.99,  # Discount factor
@@ -31,7 +31,7 @@ class SMDPQLearning:
         self.min_exploration_rate = min_exploration_rate
         self.exploration_decay = exploration_decay
 
-        if isinstance(env, TwoRooms):
+        if isinstance(env, NavigationEnv):
             self.q_table = np.zeros((env.num_states, len(options)))
         elif isinstance(env, gym.Env):
             self.q_table = np.zeros((env.observation_space.n, len(options)))
@@ -40,7 +40,7 @@ class SMDPQLearning:
         """Reset the Q-table and exploration rate"""
         self.env.reset()
         self.options = self.initial_options
-        if isinstance(self.env, TwoRooms):
+        if isinstance(self.env, NavigationEnv):
             self.q_table = np.zeros((self.env.num_states, len(self.options)))
         elif isinstance(self.env, gym.Env):
             self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
@@ -195,6 +195,7 @@ class SMDPQLearning:
 
 
 if __name__ == "__main__":
+    from env import TwoRooms
 
     # Create the TwoRooms environment
     env = TwoRooms(start_state=24, goal_state=68, negative_states_config="default", max_steps=1000)
