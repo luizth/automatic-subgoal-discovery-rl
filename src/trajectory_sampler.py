@@ -2,11 +2,19 @@ from tqdm import tqdm
 import gymnasium as gym
 
 
-def sample(env: gym.Env, agent, number_of_samples: int = 50):
-
-    # Reset
-    agent.env = env
+def reset(env: gym.Env, agent):
+    """Reset the environment and agent state"""
+    env.reset()
     agent.reset()
+    agent.env = env
+    return env, agent
+
+
+def sample(env: gym.Env, agent, number_of_samples: int = 50):
+    """ Sample trajectories from the environment using the agent """
+
+    # Set agent environment
+    agent.env = env
 
     # Loop
     trajectories = []

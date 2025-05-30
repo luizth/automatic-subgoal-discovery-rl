@@ -1,4 +1,5 @@
 import random
+from abc import ABC, abstractmethod
 from typing import List
 
 import numpy as np
@@ -6,9 +7,24 @@ import gymnasium as gym
 
 from core import Option
 from env import NavigationEnv, get_primitive_actions_as_options
+from experience_buffer import ExperienceBuffer
 
 
-class SMDPQLearning:
+class AgentWithOptions(ABC):
+    env: NavigationEnv
+    eb: ExperienceBuffer
+    options_size: int
+
+    @abstractmethod
+    def add_option(self, option: Option):
+        raise NotImplementedError()
+
+    @abstractmethod
+    def reset(self):
+        raise NotImplementedError()
+
+
+class SMDPQLearning(AgentWithOptions):
 
     def __init__(
             self,
@@ -18,7 +34,8 @@ class SMDPQLearning:
             discount_factor: float = 0.99,  # Discount factor
             exploration_rate: float = 1.0,  # Exploration rate
             min_exploration_rate: float = 0.1,
-            exploration_decay: float = 0.99
+            exploration_decay: float = 0.99,
+            store_experience: bool = False
             ):
         self.env = env
         self.initial_options = options
@@ -31,26 +48,34 @@ class SMDPQLearning:
         self.min_exploration_rate = min_exploration_rate
         self.exploration_decay = exploration_decay
 
-        if isinstance(env, NavigationEnv):
-            self.q_table = np.zeros((env.observation_space.n, len(options)))
-        elif isinstance(env, gym.Env):
-            self.q_table = np.zeros((env.observation_space.n, len(options)))
+        self.q_table = np.zeros((env.observation_space.n, len(options)))
+        self.eb = None
+
+        # Initialize the experience buffer if required
+        if store_experience:
+            self.eb = ExperienceBuffer()
+
+    @property
+    def options_size(self):
+        """Return the number of options available"""
+        return len(self.options)
 
     def reset(self):
         """Reset the Q-table and exploration rate"""
         self.env.reset()
         self.options = self.initial_options
-        if isinstance(self.env, NavigationEnv):
-            self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
-        elif isinstance(self.env, gym.Env):
-            self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
+        self.q_table = np.zeros((self.env.observation_space.n, len(self.options)))
         self.exploration_rate = self.initial_exploration_rate
+
+        # Clear the experience buffer if it exists
+        if self.eb is not None:
+            self.eb.clear()
 
     def add_option(self, option: Option):
         """Add a new option to the Q-learning agent"""
         self.options.append(option)
         # Expand the Q-table to accommodate the new option
-        self.q_table = np.hstack((self.q_table, np.zeros((self.env.observation_space.n, 1))))
+        self.q_table = np.hstack( ( self.q_table, np.ones((self.env.observation_space.n, 1)) * self.q_table.min() ) )
 
     def decay_exploration_rate(self):
         """Decay the exploration rate to gradually shift from exploration to exploitation"""
@@ -107,6 +132,10 @@ class SMDPQLearning:
                 # Choose an action using the option's policy
                 action = option.choose_action(state)
                 next_state, reward, done, trunc, info = self.env.step(action)
+
+                # Store the experience in the buffer if it exists
+                if self.eb is not None and next_state != self.env.goal_transition_state:
+                    self.eb.add((state, action, next_state))
 
                 # Increase option step
                 option_k += 1

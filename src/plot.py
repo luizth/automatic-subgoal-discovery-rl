@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
+import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.patches import Arrow, Rectangle
 import matplotlib.colors as mcolors
@@ -248,3 +249,109 @@ if __name__ == "__main__":
 
     # Plot the policy
     plot_deterministic_policy(env, policy)
+
+
+from env import TwoRooms, FourRooms
+
+def state_to_coords(env, state, dim):
+    """
+    Convert a state number to (x, y) coordinates.
+
+    Parameters:
+    state_num (int): The state number
+    has_wall (bool): Whether there's a wall
+
+    Returns:
+    tuple: (row, col) coordinates
+    """
+    # Convert state number to coordinates
+    row = state // dim
+    col = state % dim
+
+    if isinstance(env, TwoRooms):
+        if state in [
+            6,  7,  8,  9, 10, 11,
+            18, 19, 20, 21, 22, 23,
+            30, 31, 32, 33, 34, 35,
+            42, 43, 44, 45, 46, 47,
+            54, 55, 56, 57, 58, 59,
+            66, 67,  68, 69, 70, 71
+        ]:
+            col += 1
+    elif isinstance(env, FourRooms):
+        if state in [
+            5,  6,  7,  8,  9,
+            15, 16, 17, 18, 19,
+            25, 26, 27, 28, 29,
+            35, 36, 37, 38, 39,
+            45, 46, 47, 48, 49,
+            55, 56, 57, 58, 59,
+            65, 66, 67, 68, 69,
+            75, 76, 77, 78, 79,
+            85, 86, 87, 88, 89,
+            95, 96, 97, 98, 99
+            ]:
+            col += 1
+        if state in [
+            50, 51, 52, 53, 54,
+            60, 61, 62, 63, 64, 65, 66, 67, 68, 69,
+            70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+            80, 81, 82, 83, 84, 85, 86, 87, 88, 89,
+            90, 91, 92, 93, 94, 95, 96, 97, 98, 99
+        ]:
+            row += 1
+
+    return row, col
+
+
+def plot_heatmap_from_state_scores(env, state_scores: dict):
+    """
+    Plot a heatmap of state scores (different metrics) for a given environment.
+    """
+
+    # Get the size of the environment
+    size = env.size
+    wall_col = size[0] // 2
+    rows, cols = size
+
+    if isinstance(env, TwoRooms):
+        dim = 12
+        cols += 1
+    elif isinstance(env, FourRooms):
+        dim = 10
+        cols += 1
+        rows += 1
+
+    # Initialize the data grid
+    data = np.zeros((rows, cols))
+
+    # Walls
+    data[:, wall_col] = -1.
+    if isinstance(env, FourRooms):
+        data[5, :5] = -1.
+        data[6, 6:] = -1.
+
+    # Hallways
+    data[2, wall_col] = 0.0
+    if isinstance(env, FourRooms):
+        data[5, 1] = 0.0
+        data[6, 8] = 0.0
+        data[9, wall_col] = 0.0
+
+    for state, score in state_scores.items():
+
+        if isinstance(env, TwoRooms) and state == 68:
+            row, col = 2, 6
+        elif isinstance(env, FourRooms) and state == 75:
+            row, col = 5, 1
+        elif isinstance(env, FourRooms) and state == 100:
+            row, col = 2, 5
+        elif isinstance(env, FourRooms) and state == 101:
+            row, col = 6, 8
+        elif isinstance(env, FourRooms) and state == 102:
+            row, col = 9, 5
+        else:
+            row, col = state_to_coords(env, state, dim)
+        data[row, col] = score
+
+    sns.heatmap(data)

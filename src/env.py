@@ -4,47 +4,26 @@ import gymnasium as gym
 
 from core import Option
 
-class Cube(gym.Env):
+class RandomWalk(gym.Env):
 
     def __init__(self,
-            size=3,
+            n=4,
             start_state=0,
-            goal_state=0,
+            goal_state=3,
             max_steps=None,
             sparse_rewards=False,
             negative_zone=False,
             ):
 
         """
-        Cube environment
+        RandomWalk environment
 
-        The grid is represented as follows:
-
-        0  1  2
-        3  4  5
-        6  7  8
-
-        or
-
-        0  1  2  3
-        4  5  6  7
-        8  9  10 11
-        12 13 14 15
-
-        or
-
-        0  1  2  3  4
-        5  6  7  8  9
-        10 11 12 13 14
-        15 16 17 18 19
-        20 21 22 23 24
-
-        Agent must execute special action in defined state to reach goal
+        Four state: 0 - 1 - 2 - 3
 
         """
 
         # Store the environment parameters
-        self.size = size
+        self.n = n
         self.start_state = start_state
         self.goal_state = goal_state
         self.max_steps = max_steps
@@ -52,8 +31,8 @@ class Cube(gym.Env):
         self.negative_zone = negative_zone
 
         # Env configuration
-        self.observation_space = gym.spaces.Discrete(size*size)
-        self.action_space = gym.spaces.Discrete(4)  # Up, Down, Left, Right
+        self.observation_space = gym.spaces.Discrete(n)
+        self.action_space = gym.spaces.Discrete(2)  # Left, Right
 
         self.state = None
         self.init_state()
@@ -68,25 +47,13 @@ class Cube(gym.Env):
         # State transition dynamics
         self.transitions = np.zeros((self.observation_space.n, self.action_space.n), dtype=int)
         for s in range(self.observation_space.n):
-            row, col = s // self.size, s % self.size
-            # Up
-            self.transitions[s, 0] = s if row == 0 else s - self.size
-            # Down
-            self.transitions[s, 1] = s if row == self.size-1 else s + self.size
             # Left
-            self.transitions[s, 2] = s if col == 0 else s - 1
+            self.transitions[s, 0] = s if s == 0 else s - 1
             # Right
-            self.transitions[s, 3] = s if col == self.size-1 else s + 1
+            self.transitions[s, 1] = s if s == n-1 else s + 1
 
         # Negative zone
         self.negative_reward_states = None
-        if self.negative_zone:
-            if size == 3:
-                self.negative_reward_states = np.random.choice([4], size=1, replace=False)
-            elif size == 4:
-                self.negative_reward_states = np.random.choice([5, 6, 9, 10], size=2, replace=False)
-            elif size == 5:
-                self.negative_reward_states = np.random.choice([6, 7, 8, 11, 12, 13, 16, 17, 18], size=3, replace=False)
 
     def init_state(self):
         """Initialize the environment to a random state"""
@@ -98,9 +65,9 @@ class Cube(gym.Env):
             self.state = np.random.randint(0, self.observation_space.n)
         return self.state
 
-    def get_reward(self, prev_action, next_state):
+    def get_reward(self, next_state):
         """Get the reward for taking an action"""
-        if prev_action == "goal" and next_state == self.goal_state:
+        if next_state == self.goal_state:
             return 1.0
         elif self.negative_zone and next_state in self.negative_reward_states:
             return -1.0
@@ -110,22 +77,19 @@ class Cube(gym.Env):
             else:
                 return -0.1
 
-    def available_actions(self, state):
-        """Get the available actions for the current state"""
-        if state == self.goal_state:
-            return [a for a in range(self.action_space.n)] + ["goal"]  # 'goal' is the special action
-        return [a for a in range(self.action_space.n)]
-
-    def is_terminal(self, prev_action, state):
+    def is_terminal(self, state):
         """Check if the state is terminal"""
         if self.max_steps is not None:
-            return (state == self.goal_state and prev_action == "goal") or self.steps >= self.max_steps
-        return state == self.goal_state and prev_action == "goal"
+            return (state == self.goal_state) or self.steps >= self.max_steps
+        return state == self.goal_state
 
     # gymnasium
-    def reset(self):
+    def reset(self, options: dict = {}):
         """Reset the environment to a random state"""
-        self.init_state()
+        if "state" in options:
+            self.state = options["state"]
+        else:
+            self.init_state()
         self.steps = 0
 
         self.info = {
@@ -137,12 +101,6 @@ class Cube(gym.Env):
 
     def step(self, action):
         """Take a step in the environment"""
-        if action == "goal":
-            self.info["goal_reached"] = True
-            self.info["total_reward"] += 1.0
-            return -1, 1.0, True, False, self.info
-
-        action = int(action)
 
         if action < 0 or action >= self.action_space.n:
             raise ValueError("Invalid action")
@@ -151,10 +109,10 @@ class Cube(gym.Env):
         next_state = self.transitions[self.state, action]
 
         # Check if the next state is terminal
-        done = self.is_terminal(action, next_state)
+        done = self.is_terminal(next_state)
 
         # Get the reward for taking the action
-        reward = self.get_reward(action, next_state)
+        reward = self.get_reward(next_state)
 
         # Update the current state
         self.state = next_state
@@ -191,6 +149,7 @@ class TwoRooms(NavigationEnv):
             negative_states_config="default",
             max_steps=None,
             sparse_rewards=True,
+            stochastic=False,
             ):
 
         """
@@ -237,6 +196,7 @@ class TwoRooms(NavigationEnv):
 
         # Goal becomes a hallway
         self.h = goal_state
+        self.hallway_height = 2
 
         # Configure negative areas
         self.negative_states_config = negative_states_config
@@ -252,6 +212,7 @@ class TwoRooms(NavigationEnv):
         self.start_state = start_state
         self.max_steps = max_steps
         self.sparse_rewards = sparse_rewards
+        self.stochastic = stochastic
 
         # Agent monitoring
         self.init_state()
@@ -327,6 +288,11 @@ class TwoRooms(NavigationEnv):
 
         self.trajectory.append(self.state)
 
+        # If stochastic, randomly choose the next action
+        if self.stochastic:
+            if np.random.rand() < 0.3:
+                action = np.random.choice(self.action_space.n)
+
         # Get the next state based on the current state and action
         next_state = self.transitions[self.state, action]
 
@@ -342,9 +308,12 @@ class TwoRooms(NavigationEnv):
 
         return next_state, reward, done, False, {}
 
-    def reset(self):
+    def reset(self, options: dict = {}):
         """Reset the environment to a random state"""
-        self.init_state()
+        if "state" in options:
+            self.state = options["state"]
+        else:
+            self.init_state()
         self.trajectory = []
         self.steps = 0
         return self.state, {}
@@ -676,9 +645,12 @@ class FourRooms(NavigationEnv):
 
         return next_state, reward, done, False, {}
 
-    def reset(self):
+    def reset(self, options: dict = {}):
         """Reset environment to initial state."""
-        self.init_state()
+        if "state" in options:
+            self.state = options["state"]
+        else:
+            self.init_state()
         self.trajectory = []
         self.steps = 0
         return self.state, {}

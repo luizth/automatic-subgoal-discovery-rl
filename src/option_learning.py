@@ -8,8 +8,12 @@ from core import (
     Subtask,
     RewardRespectingFeatureAttainment,
 )
-from utils import delta_function, UWT, one_hot, softmax
-
+from utils import (
+    delta_function,
+    UWT,
+    one_hot,
+    softmax
+)
 from env import TwoRooms
 
 
@@ -31,8 +35,8 @@ def actor_critic(
 
     def policy(state, theta):
         """Softmax policy"""
-        action_preferences = np.zeros(env.num_actions)
-        for a in range(env.num_actions):
+        action_preferences = np.zeros(env.action_space.n)
+        for a in range(env.action_space.n):
             features = env.state_action_to_features(state, a)
             action_preferences[a] = np.dot(theta, features)  # state-action value
         # Numerical stability
@@ -47,14 +51,14 @@ def actor_critic(
     env: gym.Env = task.env
 
     # Initialize weight vector and theta for our linear V(s) and Policy (knowledge learned)
-    w = np.zeros(env.num_states)  # Critic
-    theta = np.zeros(env.num_states * env.num_actions)  # Actor
+    w = np.zeros(env.observation_space.n)  # Critic
+    theta = np.zeros(env.observation_space.n * env.action_space.n)  # Actor
 
     # Behavior policy (for off-policy learning)
-    behavior_policy_probs = np.ones(env.num_actions) / env.num_actions
+    behavior_policy_probs = np.ones(env.action_space.n) / env.action_space.n
 
     # Reset the environment
-    state = env.reset()
+    state, info = env.reset()
     # start_state = state
     done = False
     stopping = False
@@ -69,7 +73,7 @@ def actor_critic(
         # Check goal reached
         if done:
             # Reset the environment
-            state = env.reset()
+            state, info = env.reset()
             # start_state = state
             done = False
             stopping = False
@@ -79,14 +83,14 @@ def actor_critic(
             e_ = np.zeros_like(theta)
 
         # Behavior policy action selection
-        action = np.random.choice(env.num_actions, p=behavior_policy_probs)
+        action = np.random.choice(env.action_space.n, p=behavior_policy_probs)
 
         # Importance sampling ratio
         probs = policy(state, theta)
         rho = probs[action] / behavior_policy_probs[action]
 
         # Take step in the environment
-        next_state, reward, done = env.step(action)  # next_state, reward, done, _, _ = env.step(action) # - TwoRooms env (legacy)
+        next_state, reward, done, _, _ = env.step(action)  # next_state, reward, done, _, _ = env.step(action) # - TwoRooms env (legacy)
 
         # Extract features
         state_features = env.state_to_features(state)
@@ -137,11 +141,11 @@ def to_deterministic_policy(env: gym.Env, theta) -> Policy:
     return policy
 
 
-def get_option_to_reach_subgoal(env: gym.Env, subgoal_state: int) -> Option:
+def learn_option_to_reach_subgoal(env: gym.Env, subgoal_state: int) -> Option:
 
     # Create a subtask to reach the subgoal
     subgoal = RewardRespectingFeatureAttainment(env, feature_attainment=subgoal_state)
-    w, theta, _, _ = actor_critic(subgoal, alpha=0.1, gamma=0.99, alpha_=0.1, number_of_steps=70000)
+    w, theta = actor_critic(subgoal, alpha=0.1, gamma=0.99, alpha_=0.1, number_of_steps=70000)
     policy: Policy = to_deterministic_policy(env, theta)
 
     # define initiation set as all states
@@ -174,7 +178,7 @@ if __name__ == "__main__":
     env = TwoRooms(start_state=24, goal_state=68, negative_states_config="none")
 
     # # Create a subtask to reach the hallway as subgoal
-    subgoal1 = RewardRespectingFeatureAttainment(env, feature_attainment=env.hallway_state)
+    subgoal1 = RewardRespectingFeatureAttainment(env, feature_attainment=env.h)
     w, theta = actor_critic(subgoal1, alpha=0.1, gamma=0.99, alpha_=0.1, number_of_steps=50000)
     policy1: Policy = to_deterministic_policy(env, theta)
     plot_deterministic_policy(env, policy1, subgoal1)

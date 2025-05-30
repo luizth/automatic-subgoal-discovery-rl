@@ -69,7 +69,7 @@ class Option:
     def __init__(self,
             id: str,
             initiation_set: Set[State],
-            policy: Dict[State, Dist],
+            policy: Policy,  # Dict[State, Dist],
             termination: Callable[[State], bool]
         ):
 

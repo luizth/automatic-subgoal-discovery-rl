@@ -65,7 +65,7 @@ def one_hot(x, num_classes):
 
 def softmax(env, state, theta):
     """Softmax policy"""
-    action_preferences = np.zeros(env.observation_space.n)
+    action_preferences = np.zeros(env.action_space.n)
     for a in range(env.action_space.n):
         features = env.state_action_to_features(state, a)
         action_preferences[a] = np.dot(theta, features)  # state-action value
