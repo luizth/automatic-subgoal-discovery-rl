@@ -1,258 +1,15 @@
-from dataclasses import dataclass
-from typing import Optional
+import itertools
 
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib.patches import Arrow, Rectangle
-import matplotlib.colors as mcolors
+from matplotlib.patches import Rectangle
 
 from core import Policy
-from env import TwoRooms
+from env import NavigationEnv, TwoRooms, FourRooms
 
 
-@dataclass
-class State:
-    num: int
-    row: int
-    col: int
-    env: TwoRooms
-    subgoal: int
-    type: str = None
-    color: str = None
-    action: int = None
-
-    def __post_init__(self):
-        if self.num in self.env.negative_states:
-            self.type = 'negative'
-        elif self.num == self.env.start_state:
-            self.type = 'start'
-        elif self.num == -1:
-            self.type = 'goal'
-        elif self.subgoal and self.num == self.subgoal.feature_attainment:  # self.env.goal_state:
-            self.type = 'hallway'
-        elif self.subgoal is None and self.num == self.env.goal_state:
-            self.type = 'hallway'
-        else:
-            self.type = 'state'
-
-        if self.type == 'state':
-            self.color = 'black'
-        elif self.type == 'negative':
-            self.color = 'lightgray'
-        elif self.type == 'start':
-            self.color = 'green'
-        elif self.type == 'goal':
-            self.color = 'red'
-        elif self.type == 'hallway':
-            self.color = 'red'
-        else:
-            raise ValueError(f"Unknown state type: {self.type}")
-
-
-def states(env, subgoal):
-    return [
-        State(env.goal_state, env.hallway_height+1, 7, env, subgoal),
-        State(0,  1,  1, env, subgoal),
-        State(1,  1,  2, env, subgoal),
-        State(2,  1,  3, env, subgoal),
-        State(3,  1,  4, env, subgoal),
-        State(4,  1,  5, env, subgoal),
-        State(5,  1,  6, env, subgoal),
-        State(6,  1,  8, env, subgoal),
-        State(7,  1,  9, env, subgoal),
-        State(8,  1, 10, env, subgoal),
-        State(9,  1, 11, env, subgoal),
-        State(10, 1, 12, env, subgoal),
-        State(11, 1, 13, env, subgoal),
-
-        State(12, 2,  1, env, subgoal),
-        State(13, 2,  2, env, subgoal),
-        State(14, 2,  3, env, subgoal),
-        State(15, 2,  4, env, subgoal),
-        State(16, 2,  5, env, subgoal),
-        State(17, 2,  6, env, subgoal),
-        State(18, 2,  8, env, subgoal),
-        State(19, 2,  9, env, subgoal),
-        State(20, 2, 10, env, subgoal),
-        State(21, 2, 11, env, subgoal),
-        State(22, 2, 12, env, subgoal),
-        State(23, 2, 13, env, subgoal),
-
-        State(24, 3,  1, env, subgoal),
-        State(25, 3,  2, env, subgoal),
-        State(26, 3,  3, env, subgoal),
-        State(27, 3,  4, env, subgoal),
-        State(28, 3,  5, env, subgoal),
-        State(29, 3,  6, env, subgoal),
-        State(30, 3,  8, env, subgoal),
-        State(31, 3,  9, env, subgoal),
-        State(32, 3, 10, env, subgoal),
-        State(33, 3, 11, env, subgoal),
-        State(34, 3, 12, env, subgoal),
-        State(35, 3, 13, env, subgoal),
-
-        State(36, 4,  1, env, subgoal),
-        State(37, 4,  2, env, subgoal),
-        State(38, 4,  3, env, subgoal),
-        State(39, 4,  4, env, subgoal),
-        State(40, 4,  5, env, subgoal),
-        State(41, 4,  6, env, subgoal),
-        State(42, 4,  8, env, subgoal),
-        State(43, 4,  9, env, subgoal),
-        State(44, 4, 10, env, subgoal),
-        State(45, 4, 11, env, subgoal),
-        State(46, 4, 12, env, subgoal),
-        State(47, 4, 13, env, subgoal),
-
-        State(48, 5,  1, env, subgoal),
-        State(49, 5,  2, env, subgoal),
-        State(50, 5,  3, env, subgoal),
-        State(51, 5,  4, env, subgoal),
-        State(52, 5,  5, env, subgoal),
-        State(53, 5,  6, env, subgoal),
-        State(54, 5,  8, env, subgoal),
-        State(55, 5,  9, env, subgoal),
-        State(56, 5, 10, env, subgoal),
-        State(57, 5, 11, env, subgoal),
-        State(58, 5, 12, env, subgoal),
-        State(59, 5, 13, env, subgoal),
-
-        State(60, 6,  1, env, subgoal),
-        State(61, 6,  2, env, subgoal),
-        State(62, 6,  3, env, subgoal),
-        State(63, 6,  4, env, subgoal),
-        State(64, 6,  5, env, subgoal),
-        State(65, 6,  6, env, subgoal),
-        State(66, 6,  8, env, subgoal),
-        State(67, 6,  9, env, subgoal),
-        State(69, 6, 11, env, subgoal),
-        State(70, 6, 12, env, subgoal),
-        State(71, 6, 13, env, subgoal),
-
-        State(68, 6, 10, env, subgoal),
-        # State(-1, 6, 10, env, ),
-    ]
-
-
-def get_state(row, col, env, subgoal):
-    """Get the state object for a given row and column from the States series."""
-    for state in states(env, subgoal):
-        if state.row == row and state.col == col:
-            return state
-    raise ValueError(f"No state found at row {row}, col {col}")
-
-
-def plot_deterministic_policy(env: TwoRooms, policy: Policy, subgoal=None):
-    # Define grid dimensions
-    rows, cols = 8, 15
-    vertical_strip = 7
-    hallway_pos = (3, 7)
-    goal_pos = (6, 10)
-
-    # Create figure and axis
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Define colors for different cell types
-    colors = {
-        'wall': 'white',
-        'state': 'black',
-        'negative_reward': 'gray',
-        'positive_reward': 'red',
-        'special_state_S': 'green',
-        'special_state_h': 'brown',
-        'special_state_G': 'red'
-    }
-
-    # Create the grid layout
-    grid = np.zeros((rows, cols), dtype=int)
-
-    # Mark walls (1) - the outer border and the middle vertical strip
-    grid[0, :] = grid[-1, :] = grid[:, 0] = grid[:, -1] = 8  # Outer walls
-    grid[:, vertical_strip] = 8  # Middle vertical wall
-
-    grid[1:6, 2:6] = -1  # Negative area
-
-    grid[hallway_pos] = 1  # Hallway
-    grid[goal_pos] = 1  # Goal position
-
-    # Draw the grid cells
-    for i in range(rows):
-        for j in range(cols):
-
-            state: Optional[State] = None
-            try:
-                state = get_state(i, j, env, subgoal)
-                state.type
-                color = state.color
-            except ValueError:
-                color = 'white'  # wall
-
-            rect = Rectangle((j, rows-i-1), 1, 1,
-                             facecolor=color,
-                             edgecolor='gray',
-                             linewidth=1)
-            ax.add_patch(rect)
-
-            # Add special state labels
-            if grid[i, j] == 4:
-                ax.text(j+0.5, rows-i-1+0.5, 'S',
-                        ha='center', va='center', color='white', fontsize=12)
-            elif grid[i, j] == 5:
-                ax.text(j+0.5, rows-i-1+0.5, 'h',
-                        ha='center', va='center', color='white', fontsize=12)
-            elif grid[i, j] == 6:
-                ax.text(j+0.5, rows-i-1+0.5, 'G',
-                        ha='center', va='center', color='white', fontsize=12)
-
-            if state:
-                state.action = np.argmax(policy[state.num])
-
-                # Draw action arrows
-                if state.action == 0:
-                    ax.arrow(j+0.5, rows-i-1+0.5, 0, 0.3,
-                             head_width=0.1, head_length=0.1, fc='white', ec='white')
-                elif state.action == 1:
-                    ax.arrow(j+0.5, rows-i-1+0.5, 0, -0.3,
-                             head_width=0.1, head_length=0.1, fc='white', ec='white')
-                elif state.action == 2:
-                    ax.arrow(j+0.5, rows-i-1+0.5, -0.3, 0,
-                             head_width=0.1, head_length=0.1, fc='white', ec='white')
-                elif state.action == 3:
-                    ax.arrow(j+0.5, rows-i-1+0.5, 0.3, 0,
-                             head_width=0.1, head_length=0.1, fc='white', ec='white')
-                else:
-                    raise ValueError("Invalid action value")
-
-    # Set the plot limits
-    ax.set_xlim(0, cols)
-    ax.set_ylim(0, rows)
-
-    # Remove ticks
-    ax.set_xticks([])
-    ax.set_yticks([])
-
-    # Set title
-    ax.set_title('Grid World Environment with Policy', fontsize=14)
-
-    plt.tight_layout()
-    plt.show()
-
-
-if __name__ == "__main__":
-
-    # Create env
-    env = TwoRooms(start_state=24, goal_state=20, negative_states_config="none")
-
-    # Create sample policy
-    policy: Policy = {s: np.random.randint(0, 4) for s in range(env.observation_space.n)}
-
-    # Plot the policy
-    plot_deterministic_policy(env, policy)
-
-
-from env import TwoRooms, FourRooms
-
+# Helper functions
 def state_to_coords(env, state, dim):
     """
     Convert a state number to (x, y) coordinates.
@@ -269,14 +26,7 @@ def state_to_coords(env, state, dim):
     col = state % dim
 
     if isinstance(env, TwoRooms):
-        if state in [
-            6,  7,  8,  9, 10, 11,
-            18, 19, 20, 21, 22, 23,
-            30, 31, 32, 33, 34, 35,
-            42, 43, 44, 45, 46, 47,
-            54, 55, 56, 57, 58, 59,
-            66, 67,  68, 69, 70, 71
-        ]:
+        if state in env.right_room:
             col += 1
     elif isinstance(env, FourRooms):
         if state in [
@@ -304,10 +54,149 @@ def state_to_coords(env, state, dim):
     return row, col
 
 
-def plot_heatmap_from_state_scores(env, state_scores: dict):
+def coord_to_state(row, col, dim):
+    """
+    Convert (x, y) coordinates to a state number.
+
+    Parameters:
+    row (int): The row index
+    col (int): The column index
+    dim (int): The dimension of the grid
+
+    Returns:
+    int: The state number
+    """
+    return row * dim + col
+
+
+def plot_deterministic_policy_in_tworooms(
+        env: NavigationEnv,
+        policy: Policy,
+        g,
+        plot_policy=True,
+        plot_start_and_goal=True,
+        save=False,
+        filename="tworooms_policy.pdf"):
+    """
+    Plot a deterministic policy in the given environment.
+
+    Parameters:
+    env (NavigationEnv): The environment to plot the policy in.
+    policy (Policy): The deterministic policy to plot.
+    """
+    # Define grid dimensions
+    rows, cols = env.rows + 2, env.cols + 3
+    vertical_strip = env.room_size + 1
+
+    hallway_pos = (env.hallway_height + 1, vertical_strip)
+    goal_pos = state_to_coords(env, env.goal_state, env.cols)  # (6, 10)
+
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Define colors for different cell types
+    colors = {
+        'wall': 'white',
+        'state': 'black',
+        'negative_reward': 'gray',
+        'positive_reward': 'red',
+        'special_state_S': 'green',
+        'special_state_h': 'brown',
+        'special_state_G': 'red'
+    }
+
+    # Create the grid layout
+    grid = np.zeros((rows, cols), dtype=int)
+
+    # Mark walls (1) - the outer border and the middle vertical strip
+    grid[0, :] = grid[-1, :] = grid[:, 0] = grid[:, -1] = 8  # Outer walls
+    grid[:, vertical_strip] = 8  # Middle vertical wall
+
+    grid[hallway_pos] = 1  # Hallway
+    grid[goal_pos] = 1  # Goal position
+
+    # Draw the grid cells
+    for i in range(rows):
+        for j in range(cols):
+
+            color = 'white'  # wall
+
+            if i == rows - 1 or j == cols - 1:
+                pass
+            else:
+                _i = i - 1
+                _j = j - 1 if j < vertical_strip else j - 2  # Adjust for the wall column
+                s = coord_to_state(_i, _j, env.cols)
+
+                # walls
+                if i == 0 or i == rows - 1 or j == 0 or j == cols - 1 or (j == vertical_strip and i != hallway_pos[0]):
+                    color = 'white'  # wall
+                elif s == env.goal_state or s == g and plot_start_and_goal:
+                    color = 'red'
+                elif s == env._init_state and plot_start_and_goal:
+                    color = 'green'
+                else:
+                    color = 'black'  # default state color
+
+            rect = Rectangle(
+                (j, rows-i-1), 1, 1,
+                facecolor=color,
+                edgecolor='gray',
+                linewidth=1)
+            ax.add_patch(rect)
+
+            # Add special state labels
+            if grid[i, j] == 4:
+                ax.text(j+0.5, rows-i-1+0.5, 'S', ha='center', va='center', color='white', fontsize=12)
+            elif grid[i, j] == 5:
+                ax.text(j+0.5, rows-i-1+0.5, 'h', ha='center', va='center', color='white', fontsize=12)
+            elif grid[i, j] == 6:
+                ax.text(j+0.5, rows-i-1+0.5, 'G', ha='center', va='center', color='white', fontsize=12)
+
+            # Draw action arrows if the cell is a state and has a policy
+            if plot_policy and color == 'black' and s in policy:
+                a = np.argmax(policy[s])
+
+                # Draw action arrows
+                if a == 0:
+                    ax.arrow(j+0.5, rows-i-1+0.5, 0, 0.3, head_width=0.1, head_length=0.1, fc='white', ec='white')
+                elif a == 1:
+                    ax.arrow(j+0.5, rows-i-1+0.5, 0, -0.3, head_width=0.1, head_length=0.1, fc='white', ec='white')
+                elif a == 2:
+                    ax.arrow(j+0.5, rows-i-1+0.5, -0.3, 0, head_width=0.1, head_length=0.1, fc='white', ec='white')
+                elif a == 3:
+                    ax.arrow(j+0.5, rows-i-1+0.5, 0.3, 0, head_width=0.1, head_length=0.1, fc='white', ec='white')
+                else:
+                    raise ValueError("Invalid action value")
+
+    # Set the plot limits
+    ax.set_xlim(0, cols)
+    ax.set_ylim(0, rows)
+
+    # Remove ticks
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+    # Set title
+    # ax.set_title('Grid World Environment with Policy', fontsize=14)
+
+    plt.tight_layout()
+    plt.show()
+    plt.rc('legend', fontsize=22)
+
+    if save:
+        fig.savefig(f"../imgs/{filename}", format="pdf")
+        print(f"Policy plot saved as {filename}")
+
+    return fig, ax
+
+
+def plot_heatmap_from_state_scores(env, state_scores: dict, save: bool, filename: str):
     """
     Plot a heatmap of state scores (different metrics) for a given environment.
     """
+    # Create figure and axis
+    fig, ax = plt.subplots(figsize=(10, 8))
 
     # Get the size of the environment
     size = env.size
@@ -315,10 +204,10 @@ def plot_heatmap_from_state_scores(env, state_scores: dict):
     rows, cols = size
 
     if isinstance(env, TwoRooms):
-        dim = 12
+        dim = size[1]
         cols += 1
     elif isinstance(env, FourRooms):
-        dim = 10
+        dim = size[1]
         cols += 1
         rows += 1
 
@@ -341,8 +230,11 @@ def plot_heatmap_from_state_scores(env, state_scores: dict):
     for state, score in state_scores.items():
 
         if isinstance(env, TwoRooms) and state == 68:
-            row, col = 2, 6
-        elif isinstance(env, FourRooms) and state == 75:
+            if state == env.h:
+                row, col = env.hallway_height, env.room_size
+            else:
+                row, col = state_to_coords(env, state, dim)
+        elif isinstance(env, FourRooms) and state == 99:
             row, col = 5, 1
         elif isinstance(env, FourRooms) and state == 100:
             row, col = 2, 5
@@ -354,4 +246,9 @@ def plot_heatmap_from_state_scores(env, state_scores: dict):
             row, col = state_to_coords(env, state, dim)
         data[row, col] = score
 
-    sns.heatmap(data)
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(data, annot=True, fmt=".2f", linewidth=.5, cmap="crest",ax=ax)  # .set_title(title)
+    if save:
+        plt.savefig(f"../imgs/{filename}", format="pdf")
+
+    return fig, ax

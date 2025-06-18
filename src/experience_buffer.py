@@ -47,11 +47,6 @@ class ExperienceBuffer:
         next_states = [exp.next_state for exp in self.buffer]
         return np.array(states), np.array(actions), np.array(next_states)
 
-    def state_action_pairs(self):
-        if not self.buffer:
-            return None
-        return [(exp.state, exp.action) for exp in self.buffer]
-
     def __len__(self):
         return len(self.buffer)
 

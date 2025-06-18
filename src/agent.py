@@ -3,10 +3,10 @@ from abc import ABC, abstractmethod
 from typing import List
 
 import numpy as np
-import gymnasium as gym
+from tqdm import tqdm
 
 from core import Option
-from env import NavigationEnv, get_primitive_actions_as_options
+from env import NavigationEnv
 from experience_buffer import ExperienceBuffer
 
 
@@ -23,6 +23,10 @@ class AgentWithOptions(ABC):
     def reset(self):
         raise NotImplementedError()
 
+    @abstractmethod
+    def run_episode(self):
+        raise NotImplementedError()
+
 
 class SMDPQLearning(AgentWithOptions):
 
@@ -35,7 +39,8 @@ class SMDPQLearning(AgentWithOptions):
             exploration_rate: float = 1.0,  # Exploration rate
             min_exploration_rate: float = 0.1,
             exploration_decay: float = 0.99,
-            store_experience: bool = False
+            store_experience: bool = False,
+            log: bool = False
             ):
         self.env = env
         self.initial_options = options
@@ -49,16 +54,37 @@ class SMDPQLearning(AgentWithOptions):
         self.exploration_decay = exploration_decay
 
         self.q_table = np.zeros((env.observation_space.n, len(options)))
+        # self.prob_bonus = np.zeros(len(options))
         self.eb = None
 
         # Initialize the experience buffer if required
         if store_experience:
             self.eb = ExperienceBuffer()
 
+        self.log = log
+
     @property
     def options_size(self):
         """Return the number of options available"""
         return len(self.options)
+
+    def copy(self, copy_qtable=False):
+        """Create a copy of the agent with the same environment and options"""
+        new_agent = SMDPQLearning(
+            env=self.env,
+            options=self.options.copy(),
+            learning_rate=self.learning_rate,
+            discount_factor=self.discount_factor,
+            exploration_rate=self.initial_exploration_rate,
+            min_exploration_rate=self.min_exploration_rate,
+            exploration_decay=self.exploration_decay,
+            store_experience=(self.eb is not None),
+            log=self.log
+        )
+        if copy_qtable:
+            # Copy the Q-table if requested
+            new_agent.q_table = self.q_table.copy()
+        return new_agent
 
     def reset(self):
         """Reset the Q-table and exploration rate"""
@@ -71,11 +97,19 @@ class SMDPQLearning(AgentWithOptions):
         if self.eb is not None:
             self.eb.clear()
 
-    def add_option(self, option: Option):
+    def add_option(self, option: Option, initial_q_value=None):
         """Add a new option to the Q-learning agent"""
         self.options.append(option)
+
         # Expand the Q-table to accommodate the new option
-        self.q_table = np.hstack( ( self.q_table, np.ones((self.env.observation_space.n, 1)) * self.q_table.min() ) )
+        if initial_q_value is not None:
+            o_q_value = initial_q_value
+        else:
+            o_q_value = self.q_table.min()
+        self.q_table = np.hstack( ( self.q_table, np.ones((self.env.observation_space.n, 1)) * o_q_value ) )
+
+        # Expand statistics
+        self.option_taken.resize(self.options_size + 1, refcheck=False)
 
     def decay_exploration_rate(self):
         """Decay the exploration rate to gradually shift from exploration to exploitation"""
@@ -87,11 +121,8 @@ class SMDPQLearning(AgentWithOptions):
             # Exploration: choose a random option
             return np.random.choice(self.options)
         else:
-            if all([e1 == e2 for e1, e2 in zip(self.q_table[state], self.q_table[state][1:])]):
-                # If all Q-values are equal, choose a random option
-                return np.random.choice(self.options)
             # Exploitation: choose the best option based on Q-values
-            option_i = np.argmax(self.q_table[state])
+            option_i = np.random.choice(np.flatnonzero(self.q_table[state] == self.q_table[state].max()))
             return self.options[option_i]
 
     def update_q_value(self, state, option_index, reward, next_state, done, option_k=1):
@@ -104,7 +135,83 @@ class SMDPQLearning(AgentWithOptions):
         td_error = td_target - self.q_table[state][option_index]
         self.q_table[state][option_index] += self.learning_rate * td_error
 
-    def run_episode(self):
+    def run(self, number_of_steps=50000, episode_length=None):
+        """Run the agent for a specified number of steps"""
+        # Reset the environment
+        initial_state, info = self.env.reset()
+        state = initial_state
+
+        # Statistics
+        returns = np.zeros(number_of_steps)
+        rewards = np.zeros(number_of_steps)
+        total_rewards = np.zeros(number_of_steps)
+
+        # Execute episode
+        G = 0
+        ep_steps = 0
+        total_reward = 0
+        done = False
+        for step in tqdm(range(number_of_steps)):
+
+            # Check if episode ended
+            if done:
+                # Reset the environment
+                initial_state, info = self.env.reset()
+                state = initial_state
+                G = 0
+                ep_steps = 0
+                done = False
+
+            # Choose an option based on the current state
+            option = self.choose_option(state)  # policy over options
+            option_i = self.options.index(option)
+
+            # From executing option
+            option_s = state
+            option_r = 0
+            option_k = 0
+            option_done = False
+            while not option_done and not done:
+                # Choose an action using the option's policy
+                action = option.choose_action(state)
+                next_state, reward, done, trunc, info = self.env.step(action)
+
+                # Update the cumulative return
+                G += self.discount_factor ** (ep_steps) * reward
+                ep_steps += 1
+                total_reward += reward
+
+                # Increase option step
+                option_k += 1
+
+                # Update option reward model
+                option_r += self.discount_factor ** (option_k-1) * reward
+
+                # Check if the option terminates
+                if option.terminate(next_state):
+                    option_done = True
+
+                # Step to next state
+                state = next_state
+
+            # Statistics
+            returns[step] = G
+            rewards[step] = reward
+            total_rewards[step] = total_reward
+
+            # Store the experience in the buffer if it exists
+            if self.eb is not None and next_state != self.env.goal_transition_state:
+                self.eb.add((option_s, action, next_state))
+
+            # Update the Q-value for the option
+            self.update_q_value(option_s, option_i, option_r, next_state, done, option_k)
+
+            if episode_length is not None and step >= episode_length:
+                done = True
+
+        return returns, rewards, total_rewards
+
+    def run_episode(self, max_steps=None):
         """Run a single episode of the environment"""
         # Reset the environment
         initial_state, info = self.env.reset()
@@ -120,7 +227,7 @@ class SMDPQLearning(AgentWithOptions):
         while not done:
 
             # Choose an option based on the current state
-            option = self.choose_option(state)
+            option = self.choose_option(state)  # policy over options
             option_i = self.options.index(option)
 
             # From executing option
@@ -132,10 +239,6 @@ class SMDPQLearning(AgentWithOptions):
                 # Choose an action using the option's policy
                 action = option.choose_action(state)
                 next_state, reward, done, trunc, info = self.env.step(action)
-
-                # Store the experience in the buffer if it exists
-                if self.eb is not None and next_state != self.env.goal_transition_state:
-                    self.eb.add((state, action, next_state))
 
                 # Increase option step
                 option_k += 1
@@ -154,91 +257,14 @@ class SMDPQLearning(AgentWithOptions):
                 steps += 1
                 trajectory.append(state)
 
+            # Store the experience in the buffer if it exists
+            if self.eb is not None and next_state != self.env.goal_transition_state:
+                self.eb.add((option_s, action, next_state))
+
             # Update the Q-value for the option
             self.update_q_value(option_s, option_i, option_r, next_state, done, option_k)
 
+            if max_steps is not None and steps >= max_steps:
+                done = True
+
         return initial_state, total_reward, steps, self.env.goal_reached(), trajectory
-
-    def train(self, episodes=1000, log=False):
-        """Train the agent for a specified number of episodes"""
-
-        # Initialize statistics
-        steps_to_goal = np.zeros(episodes)
-        rewards = np.zeros(episodes)
-
-        for episode in range(episodes):
-            episode_reward = 0
-
-            # Reset the env
-            state, info = self.env.reset()
-
-            # Execute episode
-            done = False
-            while not done:
-
-                # Choose an option based on the current state
-                option = self.choose_option(state)
-                option_i = self.options.index(option)
-
-                if option_i == 4:
-                    # print(end=".")
-                    pass
-
-                option_s = state
-                option_r = 0
-                option_k = 0
-                option_done = False
-                while not option_done and not done:
-                    # Choose an action using the option's policy
-                    action = option.choose_action(state)
-                    next_state, reward, done, trunc, info = self.env.step(action)
-
-                    # Increase option step
-                    option_k += 1
-
-                    # Update option reward model
-                    option_r += self.discount_factor ** (option_k-1) * reward
-
-                    # Check if the option terminates
-                    if option.terminate(next_state):
-                        option_done = True
-
-                    # Step to next state
-                    state = next_state
-                    episode_reward += reward
-
-                # Update the Q-value for the option
-                self.update_q_value(option_s, option_i, option_r, next_state, done, option_k)
-
-            # Decay the exploration rate
-            self.decay_exploration_rate()
-
-            # Store statistics
-            steps_to_goal[episode] = self.env.steps
-            rewards[episode] = episode_reward
-
-            if log:
-                print(f"Episode {episode + 1}/{episodes}. Steps to end episode: {self.env.steps}. Start state Q values: {self.q_table[self.env.start_state]}")
-
-        return steps_to_goal
-
-
-if __name__ == "__main__":
-    from env import TwoRooms
-
-    # Create the TwoRooms environment
-    env = TwoRooms(start_state=24, goal_state=68, negative_states_config="default", max_steps=1000)
-
-    # Get the primitive actions as options
-    primitive_options: List[Option] = get_primitive_actions_as_options(env)
-
-    # Create the Q-learning agent
-    agent = SMDPQLearning(
-        env,
-        primitive_options,
-        learning_rate=0.1,
-        discount_factor=0.99,
-        exploration_rate=1.0,
-        min_exploration_rate=0.1,
-        exploration_rate_decay=0.99
-    )

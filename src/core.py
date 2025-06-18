@@ -9,8 +9,10 @@ from utils import to_tensor
 
 
 State = int
+Action = int
 Dist = List[float]  # prob dist that sums to 1.
 Policy = Dict[State, Dist]  # policy is a mapping from state to action distribution
+DeterministicPolicy = Dict[State, Action]  # deterministic policy is a mapping from state to action
 Subgoal = int
 Trajectory = List[State]
 
@@ -88,6 +90,17 @@ class Option:
         if state not in self.initiation_set:
             return True
         return self.termination(state)
+
+    def save_policy(self, path: str):
+        import pickle
+        with open(path, 'wb') as f:
+            pickle.dump(self.policy, f)
+
+    @staticmethod
+    def load(path: str):
+        import pickle
+        with open(path, 'rb') as f:
+            return pickle.load(f)
 
     def __repr__(self):
         return f"""

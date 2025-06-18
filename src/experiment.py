@@ -1,16 +1,13 @@
 from argparse import ArgumentParser
+from dataclasses import dataclass
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 from core import (
     Policy,
     Option,
-    Subtask,
     RewardRespectingFeatureAttainment,
-)
-from plot import (
-    plot_deterministic_policy,
-    plot_heatmap_from_state_scores
 )
 from agent import AgentWithOptions, SMDPQLearning
 from env import (
@@ -34,16 +31,20 @@ from option_learning import (
 parser = ArgumentParser(description="Run experiments for evaluation.")
 
 # Experiment argumentents
+parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility.")
+parser.add_argument("--id", type=str, default="default", help="ID for the experiment.")
 parser.add_argument("--use_config_file", default=False, action="store_true", help="Use a configuration file for the experiment settings.")
 parser.add_argument("--config_file", type=str, default="config.yaml", help="Path to the configuration file.")
+parser.add_argument("--rep", type=int, default=1, help="Number of repetitions for the experiment.")
 parser.add_argument("--num_episodes", type=int, default=50, help="Number of episodes to run in the experiment.")
 parser.add_argument("--log", default=False, action="store_true", help="Log the results of the experiment.")
-# parser.add_argument("--log_file", type=str, default="./logs/experiment_log.txt", help="File to log the results of the experiment.")
+parser.add_argument("--save", default=False, action="store_true", help="Save the results of the experiment.")
+parser.add_argument("--plot", default=False, action="store_true", help="Plot the results of the experiment.")
 
 # Environment arguments
 parser.add_argument("--env", type=str, default="TwoRooms", help="Environment to use for the experiment.")
-parser.add_argument("--start_state", type=int, default=None, help="Starting state for the environment." )
-parser.add_argument("--goal_state", type=int, default=None, help="Goal state for the environment.")
+parser.add_argument("--start_states", type=int, nargs='+', default=None, help="Starting state for the environment." )
+parser.add_argument("--goal_states", type=int, nargs='+', default=None, help="Goal state for the environment.")
 parser.add_argument("--negative_states_config", type=str, default="none", help="Configuration for negative states in the environment.")
 parser.add_argument("--max_steps", type=int, default=None, help="Maximum number of steps per episode.")
 parser.add_argument("--sparse_rewards", default=False, action="store_true", help="Use sparse rewards in the environment.")
@@ -63,6 +64,33 @@ parser.add_argument("--k", type=int, default=3, help="Select top k subgoals.")
 parser.add_argument("--n_step", type=int, default=5, help="Number of steps for empowerment subgoal discovery.")
 
 
+@dataclass
+class ExperimentConfig:
+    """ Configuration for the experiment. """
+    id: str
+    rep: int
+    num_episodes: int
+    env: str
+    start_states: list[int]
+    goal_states: list[int]
+    negative_states_config: str
+    max_steps: int
+    sparse_rewards: bool
+    stochastic: bool
+    learning_rate: float
+    discount_factor: float
+    exploration_rate: float
+    min_exploration_rate: float
+    exploration_rate_decay: float
+    discovery_method: str
+    n: int
+    k: int
+    n_step: int
+    save: bool = False
+    plot: bool = False
+    log: bool = False
+
+
 # Experiment function to run the agent in the environment
 def run_experiment(env: NavigationEnv, agent: AgentWithOptions, num_episodes, discovery_method, n, k, n_step, log=False):
     """ Run the experiment for a specified number of episodes. """
@@ -71,9 +99,7 @@ def run_experiment(env: NavigationEnv, agent: AgentWithOptions, num_episodes, di
     env, agent = reset(env, agent)
 
     # Sample n episodes
-    pre_trajectories, pre_results, pre_steps = sample(env, agent, n)
-
-    assert agent.eb.size > 0
+    pre_trajectories, pre_results, pre_steps, pre_rewards, _ = sample(env, agent, n)
 
     # Discover subgoals using the specified method
     if discovery_method == "none":
@@ -88,6 +114,7 @@ def run_experiment(env: NavigationEnv, agent: AgentWithOptions, num_episodes, di
         raise ValueError(f"Unknown discovery method: {discovery_method}")
 
     # Create a subtask with the discovered subgoal
+    subgoal = None
     if subgoals is not None:
         subgoal = subgoals[0]
 
@@ -113,41 +140,39 @@ def run_experiment(env: NavigationEnv, agent: AgentWithOptions, num_episodes, di
         agent.add_option(option)
 
     # Run the agent for the remaining episodes
-    trajectories, results, steps = sample(env, agent, num_episodes - n)
+    trajectories, results, steps, rewards, _ = sample(env, agent, num_episodes - n)
 
-    return pre_trajectories + trajectories, pre_results + results, pre_steps + steps
+    # Combine the pre-sampled trajectories with the new ones
+    exp_trajectories = pre_trajectories + trajectories
+    exp_results = pre_results + results
+    exp_steps = pre_steps + steps
+    exp_rewards = pre_rewards + rewards
+
+    return exp_trajectories, exp_results, exp_steps, exp_rewards, subgoal
 
 
-if __name__ == "__main__":
-
-    # Parse command line arguments
-    args = parser.parse_args()
-
-    use_config_file = args.use_config_file
-    config_file = args.config_file
-    num_episodes = args.num_episodes
-
-    # If using a config file, load the configuration
-    if use_config_file:
-        import yaml
-        with open(config_file, 'r') as file:
-            config = yaml.safe_load(file)
-            args.__dict__.update(config)
-
-    # Parse command line arguments for the environment
-    _env = args.env
-    start_state = args.start_state
-    goal_state = args.goal_state
-    negative_states_config = args.negative_states_config
-    max_steps = args.max_steps
-    sparse_rewards = args.sparse_rewards
-    stochastic = args.stochastic
+def get_env_and_agent(
+        _env: str,
+        start_states: int,
+        goal_states: int,
+        negative_states_config: str,
+        max_steps: int,
+        sparse_rewards: bool,
+        stochastic: bool,
+        learning_rate: float,
+        discount_factor: float,
+        exploration_rate: float,
+        min_exploration_rate: float,
+        exploration_rate_decay: float
+    ):
 
     # Create the environment based on the specified type
     if _env == "TwoRooms":
         env = TwoRooms(
-            start_state=start_state,
-            goal_state=goal_state,
+            size=(10,14),
+            start_states=start_states,
+            goal_states=goal_states,
+            hallway_height=4,
             negative_states_config=negative_states_config,
             max_steps=max_steps,
             sparse_rewards=sparse_rewards,
@@ -155,8 +180,8 @@ if __name__ == "__main__":
         )
     elif _env == "FourRooms":
         env = FourRooms(
-            start_state=start_state,
-            goal_state=goal_state,
+            start_states=start_states,
+            goal_states=goal_states,
             negative_states_config=negative_states_config,
             max_steps=max_steps,
             sparse_rewards=sparse_rewards
@@ -166,13 +191,6 @@ if __name__ == "__main__":
 
     # Get the primitive actions as options
     primitive_options = get_primitive_actions_as_options(env)
-
-    # Parse command line arguments for the agent
-    learning_rate = args.learning_rate
-    discount_factor = args.discount_factor
-    exploration_rate = args.exploration_rate
-    min_exploration_rate = args.min_exploration_rate
-    exploration_rate_decay = args.exploration_rate_decay
 
     # Create the agent
     agent = SMDPQLearning(
@@ -186,94 +204,141 @@ if __name__ == "__main__":
         store_experience=True
     )
 
-    # Parse command line arguments for subgoal discovery
-    discovery_method = args.discovery_method
-    n = args.n
-    k = args.k
-    n_step = args.n_step
-
-    # Store results
-    exp_trajectories = []
-    exp_results = []
-    exp_steps = []
-
-    # Recreate agent
-    agent = SMDPQLearning(
-        env,
-        primitive_options,
-        learning_rate=learning_rate,
-        discount_factor=discount_factor,
-        exploration_rate=exploration_rate,
-        min_exploration_rate=min_exploration_rate,
-        exploration_decay=exploration_rate_decay,
-        store_experience=True
-    )
-
-    # Run the experiment with arguments
-    trajectories, results, steps = run_experiment(
-        env,
-        agent,
-        num_episodes,
-        discovery_method,
-        n,
-        k,
-        n_step,
-        log=args.log
-    )
-    exp_trajectories.append(trajectories)
-    exp_results.append(results)
-    exp_steps.append(steps)
-
-    # Run the experiment for vanilla agent (without subgoal discovery)
-    trajectories, results, steps = run_experiment(
-        env,
-        agent,
-        num_episodes,
-        "none",
-        n,
-        k,
-        n_step,
-        log=args.log
-    )
-    exp_trajectories.append(trajectories)
-    exp_results.append(results)
-    exp_steps.append(steps)
+    return env, agent
 
 
-    # Plot the results
-    import matplotlib.pyplot as plt
-    # Create the figure and primary axis
-    fig, ax1 = plt.subplots(figsize=(10, 6))
-    # fig.set_facecolor('black')
-    # ax1.set_facecolor('black')
+if __name__ == "__main__":
 
-    # Primary axis (left y-axis) for subgoal discovery (red)
-    ax1.set_xlabel('Episodes', fontsize=12, color='black')
-    ax1.set_ylabel('Steps', color='coral', fontsize=12)
-    ax1.plot(range(num_episodes), exp_steps[0], color='coral', linewidth=2)
-    ax1.tick_params(axis='y', labelcolor='coral')
-    ax1.set_xlim(0, num_episodes)
-    # ax1.set_ylim(0, 2.2)
-    ax1.grid(False)
+    # Parse command line arguments
+    args = parser.parse_args()
 
-    # Primary axis (left y-axis) for vanilla (blue)
-    ax1.set_xlabel('Episodes', fontsize=12, color='black')
-    ax1.set_ylabel('Steps', color='skyblue', fontsize=12)
-    ax1.plot(range(num_episodes), exp_steps[1], color='skyblue', linewidth=2)
-    ax1.tick_params(axis='y', labelcolor='skyblue')
-    ax1.set_xlim(0, num_episodes)
-    # ax1.set_ylim(0, 2.2)
-    ax1.grid(False)
+    # If using a config file, load the configuration
+    configs = []
+    if args.use_config_file:
+        print(f"Using configuration file: {args.config_file}")
+        import json
+        with open(args.config_file, 'r') as f:
+            configs = [ExperimentConfig(**cfg) for cfg in json.load(f)]
+    else:
+        del args.use_config_file
+        del args.config_file
+        configs = [ExperimentConfig(**args.__dict__)]
 
-    # Add title at the top (uncomment if needed)
-    # plt.title('Reinforcement Learning Training Progress', color='black', fontsize=14)
+    seed = args.seed if hasattr(args, 'seed') else None
+    if seed is not None:
+        np.random.seed(seed)
 
-    # Style the plot
-    for spine in ax1.spines.values():
-        spine.set_color('black')
+    for cfg in configs:
+        # Store results
+        exp_trajectories = []
+        exp_results = []
+        exp_steps = []
+        exp_rewards = []
+        exp_subgoals = []
 
-    ax1.tick_params(colors='black')
-    ax1.xaxis.label.set_color('black')
+        print(f"\nStarting {cfg.id} with {cfg.rep} reps for  discovery method: {cfg.discovery_method}...")
 
-    plt.tight_layout()
-    plt.show()
+        # Run the experiment with arguments
+        for i in range(cfg.rep):
+            print(f"Running experiment {i+1}/{cfg.rep}...")
+
+            # Get the environment and agent
+            env, agent = get_env_and_agent(
+                cfg.env,
+                cfg.start_states,
+                cfg.goal_states,
+                cfg.negative_states_config,
+                cfg.max_steps,
+                cfg.sparse_rewards,
+                cfg.stochastic,
+                cfg.learning_rate,
+                cfg.discount_factor,
+                cfg.exploration_rate,
+                cfg.min_exploration_rate,
+                cfg.exploration_rate_decay
+            )
+
+            try:
+                trajectories, results, steps, rewards, discovered_subgoal = run_experiment(
+                    env,
+                    agent,
+                    cfg.num_episodes,
+                    cfg.discovery_method,
+                    cfg.n,
+                    cfg.k,
+                    cfg.n_step,
+                    log=cfg.log
+                )
+
+                del env
+                del agent
+            except Exception as e:
+                print(f"Error during experiment run {i+1}: {e}. Retrying")
+                i -= 1
+                continue
+
+            exp_trajectories.append(trajectories)
+            exp_results.append(results)
+            exp_steps.append(steps)
+            exp_rewards.append(rewards)
+            exp_subgoals.append(discovered_subgoal)
+
+        # Save results to file
+        if cfg.save:
+            import json
+            class NpEncoder(json.JSONEncoder):
+                def default(self, obj):
+                    if isinstance(obj, np.integer):
+                        return int(obj)
+                    if isinstance(obj, np.floating):
+                        return float(obj)
+                    if isinstance(obj, np.ndarray):
+                        return obj.tolist()
+                    return super(NpEncoder, self).default(obj)
+
+            import os
+            # Ensure the results directory exists
+            os.makedirs("./src/results", exist_ok=True)
+            os.makedirs(f"./src/results/{cfg.env}", exist_ok=True)
+            os.makedirs(f"./src/results/{cfg.env}/{cfg.id}", exist_ok=True)
+            # Save the results to a JSON file
+            filename = f"./src/results/{cfg.env}/{cfg.id}/D{cfg.discovery_method}_Rp{cfg.rep}_n{cfg.n}_nstep{cfg.n_step}_N{cfg.negative_states_config}_SR{'t' if cfg.sparse_rewards else 'f'}_ST{'t' if cfg.stochastic else 'f'}.json"
+            with open(filename, "w") as f:
+                json.dump({
+                    "trajectories": exp_trajectories,
+                    "steps": exp_steps,
+                    "subgoals": exp_subgoals,
+                }, f, cls=NpEncoder)
+
+        if cfg.plot:
+            # Plot the results
+            import matplotlib.pyplot as plt
+            # Create the figure and primary axis
+            fig, ax1 = plt.subplots(figsize=(10, 6))
+
+            # Primary axis (left y-axis) for subgoal discovery (red)
+            ax1.set_xlabel('Episodes', fontsize=12, color='black')
+            ax1.set_ylabel('Steps', color='coral', fontsize=12)
+            ax1.plot(range(cfg.num_episodes), steps, color='coral', linewidth=2)
+            ax1.tick_params(axis='y', labelcolor='coral')
+            ax1.set_xlim(0, cfg.num_episodes)
+            ax1.grid(False)
+
+            # Add title at the top (uncomment if needed)
+            plt.title('Reinforcement Learning Training Progress', color='black', fontsize=14)
+
+            # Style the plot
+            for spine in ax1.spines.values():
+                spine.set_color('black')
+
+            ax1.tick_params(colors='black')
+
+            # Style the plot
+            for spine in ax1.spines.values():
+                spine.set_color('black')
+
+            ax1.tick_params(colors='black')
+            ax1.xaxis.label.set_color('black')
+
+            plt.tight_layout()
+            plt.show()

@@ -1,16 +1,20 @@
 from tqdm import tqdm
 import gymnasium as gym
 
+from agent import AgentWithOptions
+
 
 def reset(env: gym.Env, agent):
     """Reset the environment and agent state"""
-    env.reset()
-    agent.reset()
-    agent.env = env
-    return env, agent
+    newenv = env.copy()
+    newagent = agent.copy()
+    newagent.env = newenv
+    del env
+    del agent
+    return newenv, newagent
 
 
-def sample(env: gym.Env, agent, number_of_samples: int = 50):
+def sample(env: gym.Env, agent: AgentWithOptions, number_of_samples: int = 50):
     """ Sample trajectories from the environment using the agent """
 
     # Set agent environment
@@ -20,13 +24,15 @@ def sample(env: gym.Env, agent, number_of_samples: int = 50):
     trajectories = []
     results = []
     steps = []
+    total_rewards = []
     for t in tqdm(range(number_of_samples)):
         initial_state, total_reward, step, goal_reached, trajectory = agent.run_episode()
         trajectories.append(trajectory)
         results.append(goal_reached)
         steps.append(step)
+        total_rewards.append(total_reward)
 
-    return trajectories, results, steps
+    return trajectories, results, steps, total_rewards
 
 
 if __name__ == "__main__":
@@ -77,5 +83,5 @@ if __name__ == "__main__":
         exploration_decay=0.99
     )
 
-    trajectories, results, steps = sample(env, agent, 1)
+    trajectories, results, steps, _ = sample(env, agent, 1)
     print(f"Trajectory start: {trajectories[0][:3]} end: {trajectories[0][-3:]}  result: {results[0]} steps {steps[0]}")

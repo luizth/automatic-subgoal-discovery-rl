@@ -4,6 +4,7 @@ import gymnasium as gym
 
 from core import Option
 
+
 class RandomWalk(gym.Env):
 
     def __init__(self,
@@ -140,63 +141,58 @@ class NavigationEnv(gym.Env):
         raise NotImplementedError("goal_reached not implemented")
 
 
-class TwoRooms(NavigationEnv):
+class OpenRoom(NavigationEnv):
 
     def __init__(self,
-            size=(6, 12),
-            start_state=None,
-            goal_state=68,
-            negative_states_config="default",
-            max_steps=None,
-            sparse_rewards=True,
-            stochastic=False,
-            ):
+        size=(10, 10),
+        start_states=[0],
+        goal_states=[99],
+        negative_states_config="none",
+        max_steps=None,
+        sparse_rewards=True,
+        stochastic=False,
+        ):
 
         """
-        Two rooms environment with a hallway in between.
+        OpenRoom environment with a single room.
 
         The grid is represented as follows:
 
-        0  1  2  3  4  5  -  6  7  8  9 10 11
-        12 13 14 15 16 17 - 18 19 20 21 22 23
-        24 25 26 27 28 29 - 30 31 32 33 34 35
-        36 37 38 39 40 41 - 42 43 44 45 46 47
-        48 49 50 51 52 53 - 54 55 56 57 58 59
-        60 61 62 63 64 65 - 66 67 68 69 70 71
+        0  1  2  3  4  5  6  7  8  9
+        10 11 12 13 14 15 16 17 18 19
+        ...
+        90 91 92 93 94 95 96 97 98 99
 
-        G = 68, then
-
-        0  1  2  3  4  5  -   6  7  8  9 10 11
-        12 13 14 15 16 17 -  18 19 20 21 22 23
-        24 25 26 27 28 29 68 30 31 32 33 34 35
-        36 37 38 39 40 41 -  42 43 44 45 46 47
-        48 49 50 51 52 53 -  54 55 56 57 58 59
-        60 61 62 63 64 65 -  66 67  G 69 70 71
+        S = start state, G = goal state
 
         """
-
         # Store the environment parameters
-        if size[1] % 2 != 0:
-            raise ValueError("Width of the grid must be even")
         self.size = size
         self.rows = size[0]
         self.cols = size[1]
-        self.room_size = self.cols // 2
 
-        # Non-terminal state (hallway assumes goal state)
+        if not start_states or not isinstance(start_states, list):
+            raise ValueError("start_states must be a list of integers, but is", type(start_states))
+        if not goal_states or not isinstance(goal_states, list):
+            raise ValueError("goal_states must be an integer or a list of integers, but is", type(goal_states))
+
+        # Non-terminal state
         num_states = self.rows * self.cols
 
         # Env configuration
         self.observation_space = gym.spaces.Discrete(num_states)
-        self.action_space = gym.spaces.Discrete(4)  # Up, Down, Left, Right
+        self.action_space = gym.spaces.Discrete(4)
+
+        self.start_states = start_states
+        self.goal_states = goal_states
+        self.max_steps = max_steps
+        self.sparse_rewards = sparse_rewards
+        self.stochastic = stochastic
+        self.init_state()
+        self._init_state = self.state
 
         # State transition dynamics
-        self.goal_state = goal_state
         self.goal_transition_state = -1  # Reference to goal state
-
-        # Goal becomes a hallway
-        self.h = goal_state
-        self.hallway_height = 2
 
         # Configure negative areas
         self.negative_states_config = negative_states_config
@@ -208,42 +204,26 @@ class TwoRooms(NavigationEnv):
         # State transition dynamics
         self.transitions = self._build_transitions()
 
-        # Env configuration
-        self.start_state = start_state
-        self.max_steps = max_steps
-        self.sparse_rewards = sparse_rewards
-        self.stochastic = stochastic
-
         # Agent monitoring
-        self.init_state()
         self.steps = 0
         self.trajectory = []
 
     def _configure_negative_states(self, config):
         """Configure negative reward states based on configuration."""
         if config == "none":
-            return {}
-        elif config == "default":
-            return {1,2,3,4,13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52}  # Adjacent to hallway
-        elif config == "left_square":
-            return {13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52}
-        elif config == "right_square":
-            return {19,20,21,22,31,32,33,34,43,44,45,46,55,56,57,58}
-        elif config == "two_squares":
-            return {13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52} + {19,20,21,22,31,32,33,34,43,44,45,46,55,56,57,58}
+            return set()
         else:
             raise ValueError("Invalid negative states configuration")
 
     def _define_boundaries(self):
-        """Define the boundaries of the rooms and hallways."""
+        """Define the boundaries of the room."""
         self.upper_wall = [j for j in range(self.cols)]
         self.lower_wall = [self.cols * (self.rows-1) + j for j in range(self.cols)]
-        self.walls_to_left = [self.cols * i for i in range(self.rows)] + [self.cols * i + self.rows for i in range(self.rows)]
-        self.walls_to_right = [self.cols * i - 1 for i in range(1, self.rows+1)] + [self.cols * i + self.rows - 1 for i in range(self.rows)]
+        self.walls_to_left = [self.cols * i for i in range(self.rows)]
+        self.walls_to_right = [self.cols * i - 1 for i in range(1, self.rows+1)]
 
     def _build_transitions(self):
         """Build the state transition matrix."""
-        # State transition dynamics
         transitions = np.zeros((self.observation_space.n, self.action_space.n), dtype=int)
         for s in range(self.observation_space.n):
             row, col = s // self.cols, s % self.cols
@@ -261,25 +241,51 @@ class TwoRooms(NavigationEnv):
         below_goal = self.goal_state + self.cols
         left_goal = self.goal_state - 1
         right_goal = self.goal_state + 1
-        if above_goal in transitions:
+        if above_goal in transitions and above_goal not in self.upper_wall:
             transitions[above_goal, 1] = -1
-        if below_goal in transitions:
+        if below_goal in transitions and above_goal not in self.lower_wall:
             transitions[below_goal, 0] = -1
         if left_goal in transitions and left_goal not in self.walls_to_right:
             transitions[left_goal, 3] = -1
         if right_goal in transitions and right_goal not in self.walls_to_left:
             transitions[right_goal, 2] = -1
 
-        # Hallway transition dynamics
-        transitions[self.h, 0] = self.h
-        transitions[self.h, 1] = self.h
-        transitions[self.h, 2] = 29
-        transitions[self.h, 3] = 30
-        # adjacent to hallway
-        transitions[29, 3] = self.h
-        transitions[30, 2] = self.h
-
         return transitions
+
+    def init_state(self):
+        """Initialize the environment to a random state"""
+        self.state = np.random.choice(self.start_states)
+        self.goal_state = np.random.choice(self.goal_states)
+        return self.state
+
+    def get_reward(self, next_state):
+        if next_state == self.goal_transition_state:
+            return 10.0
+        elif next_state in self.negative_states:
+            return -1.0
+        else:
+            if self.sparse_rewards:
+                return 0.0
+            else:
+                return -0.1
+
+    def is_terminal(self, state):
+        if self.max_steps is not None:
+            return state == self.goal_transition_state or self.steps >= self.max_steps
+        return state == self.goal_transition_state
+
+    def get_action_distribution(self, state, action):
+        """Get the action distribution for a given state and action"""
+        if state == self.goal_transition_state:
+            return np.zeros(self.action_space.n)
+        else:
+            action_distribution = np.zeros(self.action_space.n)
+            action_distribution[action] = 1.0
+            return action_distribution
+
+    def goal_reached(self):
+        """Check if the goal state is reached"""
+        return self.state == self.goal_transition_state
 
     def step(self, action):
         """Take a step in the environment"""
@@ -318,26 +324,253 @@ class TwoRooms(NavigationEnv):
         self.steps = 0
         return self.state, {}
 
+
+class TwoRooms(NavigationEnv):
+
+    def __init__(self,
+        size=(6, 12),
+        start_states=[24],
+        goal_states=[68],
+        hallway_height=2,
+        negative_states_config="default",
+        max_steps=None,
+        sparse_rewards=True,
+        stochastic=False,
+        ):
+
+        """
+        Two rooms environment with a hallway in between.
+
+        The grid is represented as follows:
+
+        0  1  2  3  4  5  -  6  7  8  9 10 11
+        12 13 14 15 16 17 - 18 19 20 21 22 23
+        24 25 26 27 28 29 - 30 31 32 33 34 35
+        36 37 38 39 40 41 - 42 43 44 45 46 47
+        48 49 50 51 52 53 - 54 55 56 57 58 59
+        60 61 62 63 64 65 - 66 67 68 69 70 71
+
+        G = 68, then
+
+        0  1  2  3  4  5  -   6  7  8  9 10 11
+        12 13 14 15 16 17 -  18 19 20 21 22 23
+        24 25 26 27 28 29 68 30 31 32 33 34 35
+        36 37 38 39 40 41 -  42 43 44 45 46 47
+        48 49 50 51 52 53 -  54 55 56 57 58 59
+        60 61 62 63 64 65 -  66 67  G 69 70 71
+
+        Other example
+
+        0   1   2   3   4   5   6   -   7   8   9   10  11  12  13
+        14  15  16  17  18  19  20  -   21  22  23  24  25  26  27
+        28  29  30  31  32  33  34  -   35  36  37  38  39  40  41
+        42  43  44  45  46  47  48  -   49  50  51  52  53  54  55
+        56  57  58  59  60  61  62  -   63  64  65  66  67  68  69
+        70  71  72  73  74  75  76  -   77  78  79  80  81  82  83
+        84  85  86  87  88  89  90  -   91  92  93  94  95  96  97
+        98  99 100 101 102 103 104  -   105 106 107 108 109 110 111
+        112 113 114 115 116 117 118 -   119 120 121 122 123 124 125
+        126 127 128 129 130 131 132 -   133 134 135 136 137 138 139
+        """
+        # Store the environment parameters
+        if size[1] % 2 != 0:
+            raise ValueError("Width of the grid must be even")
+        self.size = size
+        self.rows = size[0]
+        self.cols = size[1]
+        self.room_size = self.cols // 2
+
+        # Validate start and goal states
+        if not start_states or not isinstance(start_states, list):
+            raise ValueError("start_states must be a list of integers, but is", type(start_states))
+        if not goal_states or not isinstance(goal_states, list):
+            raise ValueError("goal_states must be an integer or a list of integers, but is", type(goal_states))
+
+        # Non-terminal state (hallway assumes goal state)
+        num_states = self.rows * self.cols
+
+        # Env configuration
+        self.observation_space = gym.spaces.Discrete(num_states)
+        self.action_space = gym.spaces.Discrete(4)  # Up, Down, Left, Right
+
+        self.start_states = start_states
+        self.goal_states = goal_states
+        self.max_steps = max_steps
+        self.sparse_rewards = sparse_rewards
+        self.stochastic = stochastic
+        self.init_state()
+        self._init_state = self.state
+
+        # State transition dynamics
+        self.goal_transition_state = -1  # Reference to goal state
+
+        # Goal becomes a hallway
+        self.h = self.goal_state
+        self.hallway_height = hallway_height
+
+        # Configure negative areas
+        self.negative_states_config = negative_states_config
+        self.negative_states = self._configure_negative_states(negative_states_config)
+
+        # Define room boundaries
+        self._define_boundaries()
+
+        # State transition dynamics
+        self.transitions = self._build_transitions()
+
+        # Agent monitoring
+        self.steps = 0
+        self.trajectory = []
+
+    @property
+    def right_room(self):
+        """Get the right room states."""
+        room = []
+        for i in range(self.rows):
+            for j in range(self.room_size, self.cols):
+                room.append(j + self.cols * i)
+        if self.h in room:
+            room.remove(self.h)
+        return room
+
+    def copy(self):
+        """Create a copy of the environment"""
+        new_env = TwoRooms(
+            size=self.size,
+            start_states=self.start_states,
+            goal_states=self.goal_states,
+            hallway_height=self.hallway_height,
+            negative_states_config=self.negative_states_config,
+            max_steps=self.max_steps,
+            sparse_rewards=self.sparse_rewards,
+            stochastic=self.stochastic
+        )
+        return new_env
+
+    def _configure_negative_states(self, config):
+        """Configure negative reward states based on configuration."""
+        if config == "none":
+            return {}
+        elif config == "default":
+            return {1,2,3,4,13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52}  # Adjacent to hallway
+        elif config == "left_square":
+            return {13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52}
+        elif config == "right_square":
+            return {19,20,21,22,31,32,33,34,43,44,45,46,55,56,57,58}
+        elif config == "two_squares":
+            return {13,14,15,16,25,26,27,28,37,38,39,40,49,50,51,52} + {19,20,21,22,31,32,33,34,43,44,45,46,55,56,57,58}
+        else:
+            raise ValueError("Invalid negative states configuration")
+
+    def _define_boundaries(self):
+        """Define the boundaries of the rooms and hallways."""
+        self.upper_wall = [j for j in range(self.cols)]
+        self.lower_wall = [self.cols * (self.rows-1) + j for j in range(self.cols)]
+        self.walls_to_left = [self.cols * i for i in range(self.rows)] + [self.room_size + self.cols * i for i in range(self.rows)]
+        self.walls_to_right = [self.cols * i - 1 for i in range(1, self.rows+1)] + [self.room_size + self.cols * i - 1 for i in range(self.rows)]
+
+    def _build_transitions(self):
+        """Build the state transition matrix."""
+        # State transition dynamics
+        transitions = np.zeros((self.observation_space.n, self.action_space.n), dtype=int)
+        for s in range(self.observation_space.n):
+            row, col = s // self.cols, s % self.cols
+            # Up
+            transitions[s, 0] = s if row == 0 or s in self.upper_wall else s - self.cols
+            # Down
+            transitions[s, 1] = s if row == self.rows-1 or s in self.lower_wall else s + self.cols
+            # Left
+            transitions[s, 2] = s if col == 0 or s in self.walls_to_left else s - 1
+            # Right
+            transitions[s, 3] = s if col == self.cols-1 or s in self.walls_to_right else s + 1
+
+        # To goal transition dynamics
+        above_goal = self.goal_state - self.cols
+        below_goal = self.goal_state + self.cols
+        left_goal = self.goal_state - 1
+        right_goal = self.goal_state + 1
+        if above_goal in transitions and above_goal not in self.upper_wall:
+            transitions[above_goal, 1] = -1
+        if below_goal in transitions and below_goal not in self.lower_wall:
+            transitions[below_goal, 0] = -1
+        if left_goal in transitions and left_goal not in self.walls_to_right:
+            transitions[left_goal, 3] = -1
+        if right_goal in transitions and right_goal not in self.walls_to_left:
+            transitions[right_goal, 2] = -1
+
+        # Hallway transition dynamics
+        left_of_hallway = self.room_size + (self.hallway_height * self.cols) - 1
+        right_of_hallway = self.room_size + (self.hallway_height * self.cols)
+        transitions[self.h, 0] = self.h
+        transitions[self.h, 1] = self.h
+        transitions[self.h, 2] = left_of_hallway
+        transitions[self.h, 3] = right_of_hallway
+        # adjacent to hallway
+        transitions[left_of_hallway, 3] = self.h
+        transitions[right_of_hallway, 2] = self.h
+
+        return transitions
+
+    def step(self, action):
+        """Take a step in the environment"""
+        if self.goal_reached():
+            raise ValueError("Episode ended")
+
+        if action < 0 or action >= self.action_space.n:
+            raise ValueError("Invalid action")
+
+        self.trajectory.append(self.state)
+
+        # If stochastic, randomly choose the next action
+        if self.stochastic:
+            if np.random.rand() < 0.3:
+                action = np.random.choice(self.action_space.n)
+
+        # Get the next state based on the current state and action
+        next_state = self.transitions[self.state, action]
+
+        # Check if the next state is terminal
+        done = self.is_terminal(next_state)
+
+        # Get the reward for taking the action
+        reward = self.get_reward(next_state)
+
+        # Update the current state
+        self.state = next_state
+        self.steps += 1
+
+        return next_state, reward, done, False, {}
+
+    def reset(self, options: dict = {}):
+        """Reset the environment to a random state"""
+        if "state" in options:
+            self.state = options["state"]
+        else:
+            self.init_state()
+        self.trajectory = []
+        self.steps = 0
+        return self.state, {}
+
     def render(self):
-        for s in range(env.num_states):
+        for s in range(self.observation_space.n):
             to_print = '.'
-            if s in env.negative_states:
+            if s in self.negative_states:
                 to_print = 'N'
             if s in self.trajectory:
                 to_print = '*'
-            if s == start_state:
+            if s == self._init_state:
                 to_print = 'S'
-            if s == env.goal_state:
+            if s == self.goal_state:
                 to_print = 'G'
             if s == self.state:
                 to_print = 'X'
 
             print(to_print, end=' ')
 
-            if (s+1) % env.cols == 0:
+            if (s+1) % self.cols == 0:
                 print()
 
-        if self.state == self.hallway_state:
+        if self.state == self.h:
             print("Hallway: ", self.state)
 
     @property
@@ -348,18 +581,6 @@ class TwoRooms(NavigationEnv):
     def goal_reached(self):
         """Check if the goal state is reached"""
         return self.state == self.goal_transition_state
-
-    def copy(self):
-        """Create a copy of the environment"""
-        env_copy = TwoRooms(
-            size=self.size,
-            start_state=self.start_state,
-            goal_state=self.goal_state,
-            hallway_height=self.hallway_height,
-            negative_states_config=self.negative_states_config,
-            max_steps=self.max_steps
-        )
-        return env_copy
 
     def get_action_distribution(self, state, action):
         """Get the action distribution for a given state and action"""
@@ -372,7 +593,7 @@ class TwoRooms(NavigationEnv):
 
     def get_reward(self, next_state):
         if next_state == self.goal_transition_state:
-            return 1.0
+            return 10.0
         elif next_state in self.negative_states:
             return -1.0
         else:
@@ -402,22 +623,10 @@ class TwoRooms(NavigationEnv):
             features[state * self.action_space.n + action] = 1.0
         return features
 
-    def sample_state(self):
-        """Sample a random state from the grid"""
-        return np.random.randint(0, self.observation_space.n)
-
-    def sample_action(self):
-        """Sample a random action"""
-        return np.random.randint(0, self.action_space.n)
-
     def init_state(self):
         """Initialize the environment to a random state"""
-        if self.start_state and isinstance(self.start_state, list):
-            self.state = np.random.choice(self.start_state)
-        elif self.start_state and isinstance(self.start_state, int):
-            self.state = self.start_state
-        else:
-            self.state = self.sample_state()
+        self.state = np.random.choice(self.start_states)
+        self.goal_state = np.random.choice(self.goal_states)
         return self.state
 
 
@@ -427,39 +636,47 @@ class FourRooms(NavigationEnv):
 
     The grid is represented as follows:
 
-    Room 1                   Room 2
-    0   1  2  3  4 -  5  6  7  8  9
-    10 11 12 13 14 - 15 16 17 18 19
-    20 21 22 23 24 - 25 26 27 28 29
-    30 31 32 33 34 - 35 36 37 38 39
-    40 41 42 43 44 - 45 46 47 48 49
-    -  -  -  -  -  - 50 51 52 53 54
-    55 56 57 58 59 -  -  -  -  -  -
-    60 61 62 63 64 - 65 66 67 68 69
-    70 71 72 73 74 - 75 76 77 78 79
-    80 81 82 83 84 - 85 86 87 88 89
-    90 91 92 93 94 - 95 96 97 98 99
-    Room 3                   Room 4
+        Room1               H2  Room2
+        0   1   2   3   4   -   5   6   7   8   9
+        10  11  12  13  14  -   15  16  17  18  19
+        20  21  22  23  24  -   25  26  27  28  29
+        30  31  32  33  34  -   35  36  37  38  39
+        40  41  42  43  44  -   45  46  47  48  49
+    H1  -   -   -   -    -  -   50  51  52  53  54
+        55  56  57  58  59  -    -   -   -   -   -  H3
+        60  61  62  63  64  -   65  66  67  68  69
+        70  71  72  73  74  -   75  76  77  78  79
+        80  81  82  83  84  -   85  86  87  88  89
+        90  91  92  93  94  -   95  96  97  98  99
+        Room3               H4  Room4
 
-    when G = 75, then
+    when G = 75,
+     and hallways = [1, 2, 2. 2],
+        because (
+            from left to right in horizontal stripes,
+            and top to bottom in vertical stripes),
+        the grid will look like this
+    then
 
-    0   1  2  3  4   -  5  6   7  8  9
-    10 11 12 13 14   - 15 16  17 18 19
-    20 21 22 23 24 100 25 26  27 28 29
-    30 31 32 33 34   - 35 36  37 38 39
-    40 41 42 43 44   - 45 46  47 48 49
-    - 75  -  -  -   - 50 51  52 53 54
-    55 56 57 58 59   -  -  - 101  -  -
-    60 61 62 63 64   - 65 66  67 68 69
-    70 71 72 73 74   -  G 76  77 78 79
-    80 81 82 83 84 102 85 86  87 88 89
-    90 91 92 93 94   - 95 96  97 98 99
+        Room1               H2  Room2
+        0   1   2   3   4   -   5   6   7   8   9
+        10  11  12  13  14  -   15  16  17  18  19
+        20  21  22  23  24  100 25  26  27  28  29
+        30  31  32  33  34  -   35  36  37  38  39
+        40  41  42  43  44  -   45  46  47  48  49
+    H1  -   75  -   -    -  -   50  51  52  53  54
+        55  56  57  58  59  -    -   -  101 -   -   H3
+        60  61  62  63  64  -   65  66  67  68  69
+        70  71  72  73  74  -   75  76  77  78  79
+        80  81  82  83  84  102 85  86  87  88  89
+        90  91  92  93  94  -   95  96  97  98  99
+        Room3               H4  Room4
     """
 
     def __init__(self,
             size=(10, 10),
-            start_state=None,
-            goal_state=75,
+            start_states=[20],
+            goal_states=[75],
             negative_states_config="default",
             max_steps=None,
             sparse_rewards=True,
@@ -471,6 +688,18 @@ class FourRooms(NavigationEnv):
         self.size = size
         self.rows = size[0]
         self.cols = size[1]
+        self.rooms_size = [
+            (self.rows // 2, self.cols // 2, ),
+            (self.rows // 2 + 1, self.cols // 2, ),
+            (self.rows // 2, self.cols // 2, ),
+            (self.rows // 2 - 1, self.cols // 2, )
+        ]
+        self.hallways_pos = [1, 2, 2, 2]  # Hallways in each stripe
+
+        if not start_states or not isinstance(start_states, list):
+            raise ValueError("start_states must be a list of integers, but is", type(start_states))
+        if not goal_states or not isinstance(goal_states, list):
+            raise ValueError("goal_states must be an integer or a list of integers, but is", type(goal_states))
 
         # Non-terminal state + 3 hallways (one of them will be the goal)
         num_states = self.rows * self.cols + 3
@@ -479,15 +708,21 @@ class FourRooms(NavigationEnv):
         self.observation_space = gym.spaces.Discrete(num_states)
         self.action_space = gym.spaces.Discrete(4)  # Up, Down, Left, Right
 
+        self.start_states = start_states
+        self.goal_states = goal_states
+        self.max_steps = max_steps
+        self.sparse_rewards = sparse_rewards
+        self.init_state()
+        self._init_state = self.state
+
         # State transition dynamics
-        self.goal_state = goal_state
         self.goal_transition_state = -1  # Reference to goal state
 
         # Goal becomes a hallway
-        self.h1 = goal_state
-        self.h2 = 100
-        self.h3 = 101
-        self.h4 = 102
+        self.h1 = self.goal_state
+        self.h2 = num_states - 3  # Hallway 2
+        self.h3 = num_states - 2  # Hallway 3
+        self.h4 = num_states - 1  # Hallway 4
 
         # Configure negative areas
         self.negative_states_config = negative_states_config
@@ -499,30 +734,9 @@ class FourRooms(NavigationEnv):
         # State transition dynamics
         self.transitions = self._build_transitions()
 
-        # Env configuration
-        self.start_state = start_state
-        self.max_steps = max_steps
-        self.sparse_rewards = sparse_rewards
-
         # Agent monitoring
-        self.init_state()
         self.steps = 0
         self.trajectory = []
-
-    def _get_room_for_state(self, state):
-        """Determine which room a state belongs to."""
-        if state in self.room_1:
-            return 1
-        elif state in self.room_2:
-            return 2
-        elif state in self.room_3:
-            return 3
-        elif state in self.room_4:
-            return 4
-        elif state in self.hallway_states:
-            return "hallway"
-        else:
-            return "invalid"
 
     def _configure_negative_states(self, config):
         """Configure negative reward states based on configuration."""
@@ -553,7 +767,6 @@ class FourRooms(NavigationEnv):
         self._walls_to_right = [self.cols * i - 1 for i in range(1, self.rows+1)]
         room13_right_wall = [self.cols * i + self.rows // 2 - 1 for i in range(self.rows)]
         self._walls_to_right += room13_right_wall
-
 
     def _build_transitions(self):
         """Build the state transition matrix."""
@@ -623,6 +836,18 @@ class FourRooms(NavigationEnv):
 
         return transitions
 
+    def copy(self):
+        """Create a copy of the environment"""
+        new_env = FourRooms(
+            size=self.size,
+            start_states=self.start_states,
+            goal_states=self.goal_states,
+            negative_states_config=self.negative_states_config,
+            max_steps=self.max_steps,
+            sparse_rewards=self.sparse_rewards
+        )
+        return new_env
+
     def step(self, action):
         """Take a step in the environment."""
         if action < 0 or action >= self.action_space.n:
@@ -657,13 +882,8 @@ class FourRooms(NavigationEnv):
 
     def init_state(self):
         """Initialize the environment state."""
-        if isinstance(self.start_state, list):
-            self.state = np.random.choice(self.start_state)
-        elif isinstance(self.start_state, int):
-            self.state = self.start_state
-        else:
-            # Random start from navigable states
-            self.state = np.random.choice(list(self.navigable_states))
+        self.state = np.random.choice(self.start_states)
+        self.goal_state = np.random.choice(self.goal_states)
         return self.state
 
     def get_reward(self, next_state):
@@ -744,20 +964,6 @@ class FourRooms(NavigationEnv):
         print(f"Agent at state {self.state}, Steps: {self.steps}")
         print(f"Goal: {self.goal_state}")
 
-    def get_room_states(self, room_num):
-        """Get all states in a specific room."""
-        rooms = {1: self.room_1, 2: self.room_2, 3: self.room_3, 4: self.room_4}
-        return rooms.get(room_num, set())
-
-    def get_hallway_connections(self):
-        """Get all hallway connections as a dictionary."""
-        return {
-            "1-2": self.hallway_1_2,
-            "1-3": self.hallway_1_3,
-            "2-4": self.hallway_2_4,
-            "3-4": self.hallway_3_4
-        }
-
 
 def get_primitive_actions_as_options(env: NavigationEnv):
     """Convert primitive actions to options for navigation environment."""
@@ -783,79 +989,3 @@ def get_primitive_actions_as_options(env: NavigationEnv):
             )
         )
     return options
-
-
-if __name__ == "__main__":
-    from argparse import ArgumentParser
-
-    parser = ArgumentParser()
-    parser.add_argument("--env", type=str, default="tworooms", help="Environment to use")
-
-    args = parser.parse_args()
-
-    # Example usage of the TwoRooms environment
-    if args.env == "tworooms":
-
-        # Create the TwoRooms environment
-        env = TwoRooms(
-            start_state=5,
-            goal_state=6,
-            max_steps=100,
-        )
-
-        # Run a simple episode
-        start_state = env.reset()
-        G = 0.
-        done = False
-        steps = 1
-        while not done:
-            print()
-            print("Step: ", steps)
-            print("State: ", env.state)
-            print("G: ", G)
-            env.render()
-
-            action = int(input("Action: "))
-            next_state, reward, done, _, _ = env.step(action)
-            G += reward
-            steps += 1
-
-    # Example usage of the FourRooms environment
-    elif args.env == "fourrooms":
-
-        # Test the FourRooms environment
-        env = FourRooms(
-            start_state=0,
-            goal_state=35,
-            negative_states_config="default"
-        )
-
-        print("=== FourRooms Environment Test ===")
-        print(f"Grid size: {env.rows}x{env.cols} = {env.num_states} states")
-        print(f"Room 1: {sorted(env.room_1)}")
-        print(f"Room 2: {sorted(env.room_2)}")
-        print(f"Room 3: {sorted(env.room_3)}")
-        print(f"Room 4: {sorted(env.room_4)}")
-        print(f"Hallway states: {sorted(env.hallway_states)}")
-        print(f"Hallway connections: {env.get_hallway_connections()}")
-        print(f"Negative states: {sorted(env.negative_states)}")
-        print(f"Total navigable states: {len(env.navigable_states)}")
-
-        # Test episode
-        state, info = env.reset()
-        env.render()
-
-        print("\n=== Running test episode ===")
-        done = False
-        step_count = 0
-        while not done and step_count < 30:
-            action = env.sample_action()
-            next_state, reward, done, truncated, info = env.step(action)
-            print(f"Step {step_count+1}: Action {action}, State {env.state}, Reward {reward}")
-            step_count += 1
-
-            if step_count % 10 == 0:  # Show environment every 10 steps
-                env.render()
-
-        env.render()
-        print(f"Episode finished: Goal reached = {env.goal_reached()}")
