@@ -2,6 +2,9 @@ import itertools
 import numpy as np
 from scipy.stats import entropy
 
+from typing import Dict, Optional, Tuple
+
+from core import State
 from env import NavigationEnv
 from experience_buffer import ExperienceBuffer
 
@@ -59,6 +62,7 @@ def calculate_empowerment_exact(T: dict, state: int, time_horizon: int, num_acti
             for action in action_sequence:
                 if T[current_state, action, :].sum() == 0:
                     break  # If no transition exists, break
+                # Query our model for the next state
                 current_state = np.argmax(T[current_state, action, :])
             all_final_states.append(current_state)
 
@@ -73,12 +77,19 @@ def calculate_empowerment_exact(T: dict, state: int, time_horizon: int, num_acti
         return np.log2(len(unique_states))  # - entropy(probabilities, base=2)
 
 
-def empowerment_subgoal_discovery(eb: ExperienceBuffer, k=3, n_step=5, n_samples=1000):
+def empowerment_subgoal_discovery(
+        eb: ExperienceBuffer,
+        k=3,
+        n_step=5,
+        return_scores=False,
+        log=False
+    ) -> Tuple[State, Optional[Dict[int, float]]]:
     """ Discover subgoals based on empowerment scores from the experience buffer. """
 
     # Get experience buffer
     eb = eb.copy()
-    print("Collected experience in buffer", eb.size)
+    if log:
+        print("Collected experience in buffer", eb.size)
 
     # Build transition matrix
     states, actions, next_states = eb.transition_matrix()
@@ -88,7 +99,7 @@ def empowerment_subgoal_discovery(eb: ExperienceBuffer, k=3, n_step=5, n_samples
     unique_actions = np.unique(actions)
     unique_next_states = np.unique(next_states)
 
-    T = np.zeros((unique_next_states.shape[0], unique_actions.shape[0], unique_states.shape[0]), dtype=np.float64)
+    T = np.zeros((unique_states.shape[0], unique_actions.shape[0], unique_next_states.shape[0]), dtype=np.float64)
     for s, a, ns in zip(states, actions, next_states):
         try:
             T[s, a, ns] = 1.
@@ -96,19 +107,23 @@ def empowerment_subgoal_discovery(eb: ExperienceBuffer, k=3, n_step=5, n_samples
             continue
 
     # Check the shape of the transition matrix
-    print("Build transition matrix T of shape", T.shape)
+    if log:
+        print("Build transition matrix T of shape", T.shape)
 
     # Compute empowerment score for each state
     emp_scores = {}
     for s in range(unique_states.shape[0]):
-        emp_scores[s] = calculate_empowerment_exact(T, n_step, s, n_samples=n_samples)
+        emp_scores[s] = calculate_empowerment_exact(T, s, n_step, unique_actions.shape[0])
     emp_scores
 
     # Select highest empowerment scores
     empowerment_scores = sorted(emp_scores.items(), key=lambda state_emp: state_emp[1], reverse=True)
     selected = [state_emp[0] for state_emp in empowerment_scores[:k]]
-    print("Selected %d states with highest empowerment scores" % k, selected)
+    if log:
+        print("Selected %d states with highest empowerment scores" % k, selected)
 
+    if return_scores:
+        return selected, emp_scores
     return selected
 
 

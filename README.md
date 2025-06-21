@@ -1,1 +1,1 @@
-# Automatic Subgoal Discovery for Options-Based Reinforcement Learning
+# Automatic Subgoal Discovery for Option-based Reinforcement Learning

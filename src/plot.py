@@ -191,7 +191,7 @@ def plot_deterministic_policy_in_tworooms(
     return fig, ax
 
 
-def plot_heatmap_from_state_scores(env, state_scores: dict, save: bool, filename: str):
+def plot_heatmap_from_state_scores(env, state_scores: dict, save: bool, filename: str, show_scores=False):
     """
     Plot a heatmap of state scores (different metrics) for a given environment.
     """
@@ -247,7 +247,7 @@ def plot_heatmap_from_state_scores(env, state_scores: dict, save: bool, filename
         data[row, col] = score
 
     plt.figure(figsize=(12, 8))
-    sns.heatmap(data, annot=True, fmt=".2f", linewidth=.5, cmap="crest",ax=ax)  # .set_title(title)
+    sns.heatmap(data, annot=show_scores, fmt=".2f", linewidth=.5, cmap="crest", ax=ax)  # .set_title(title)
     if save:
         plt.savefig(f"../imgs/{filename}", format="pdf")
 

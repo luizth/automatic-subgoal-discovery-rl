@@ -108,9 +108,6 @@ class SMDPQLearning(AgentWithOptions):
             o_q_value = self.q_table.min()
         self.q_table = np.hstack( ( self.q_table, np.ones((self.env.observation_space.n, 1)) * o_q_value ) )
 
-        # Expand statistics
-        self.option_taken.resize(self.options_size + 1, refcheck=False)
-
     def decay_exploration_rate(self):
         """Decay the exploration rate to gradually shift from exploration to exploitation"""
         self.exploration_rate = max(self.min_exploration_rate, self.exploration_rate * self.exploration_decay)

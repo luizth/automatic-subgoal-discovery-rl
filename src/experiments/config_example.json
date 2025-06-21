@@ -1,0 +1,26 @@
+[
+    {
+        "id": "vanilla",
+        "rep": 100,
+        "num_episodes": 50,
+        "env": "TwoRooms",
+        "start_states": [0],
+        "goal_states": [139],
+        "negative_states_config": "none",
+        "max_steps": null,
+        "sparse_rewards": true,
+        "stochastic": false,
+        "learning_rate": 0.1,
+        "discount_factor": 0.99,
+        "exploration_rate": 0.1,
+        "min_exploration_rate": 0.1,
+        "exploration_rate_decay": 1.0,
+        "discovery_method": "emp",
+        "n": 10,
+        "k": 1,
+        "n_step": 5,
+        "save": true,
+        "plot": true,
+        "log": true
+    }
+]

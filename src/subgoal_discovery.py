@@ -1,8 +1,10 @@
+""" A collection of subgoal discovery algorithms (currently not working). """
+
 from typing import List, Dict, Tuple, Set
 import numpy as np
 from collections import defaultdict
 
-from core import Trajectory, Subgoal
+from core import Trajectory, State
 
 
 # Terminal state in the environment
@@ -14,7 +16,7 @@ def diverse_density(
     results: List[bool],
     static_filter: Set[int] = None,
     threshold: float = 0.0001
-) -> List[Tuple[Subgoal, float]]:
+) -> List[State[int, float]]:
     """
     Discover subgoals using diverse density.
 
@@ -64,7 +66,7 @@ def diverse_density(
     return sorted_dd
 
 
-def calculate_dd(state: Subgoal, positive_bags: List[Trajectory], negative_bags: List[Trajectory]) -> float:
+def calculate_dd(state: State, positive_bags: List[Trajectory], negative_bags: List[Trajectory]) -> float:
     """
     Calculate the diverse density value for a given state using the noisy-or model
     as described in the McGovern paper.
@@ -133,7 +135,7 @@ def running_average_dd(
     lambda_value: float = 0.9,
     static_filter: Set[int] = None,
     threshold: float = 0.5
-) -> Dict[Subgoal, float]:
+) -> Dict[State, float]:
     """
     Maintain a running average of diverse density values to identify persistent peaks.
 
@@ -171,7 +173,7 @@ def running_average_dd(
     return filtered_avg
 
 
-def create_option_for_subgoal_dd(subgoal: Subgoal, trajectories: List[Trajectory], n: int = 5):
+def create_option_for_subgoal_dd(subgoal: State, trajectories: List[Trajectory], n: int = 5):
     """
     Create an option with an input set for a given subgoal by examining trajectories.
 
@@ -308,6 +310,7 @@ def is_subgoal(state, rn_scores, p, q, priors_ratio, costs_ratio, threshold, ret
 
     return proportion > decision_threshold
 
+
 def relative_novelty(
     trajectories: List[Trajectory],
     novelty_lag: int = 7,
@@ -319,7 +322,7 @@ def relative_novelty(
     priors_ratio: float = 100.0,  # P(N)/P(T) from paper
     static_filter: Set[int] = None,
     return_scores: bool = False
-) -> List[Subgoal]:
+) -> List[State]:
     """
     Discover subgoals using the relative novelty algorithm.
 
@@ -395,7 +398,7 @@ def relative_novelty(
 
 
 def create_option_for_subgoal_rn(
-    subgoal: Subgoal,
+    subgoal: State,
     trajectories: List[Trajectory],
     option_lag: int = 10
 ):

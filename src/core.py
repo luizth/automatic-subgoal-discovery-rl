@@ -13,7 +13,6 @@ Action = int
 Dist = List[float]  # prob dist that sums to 1.
 Policy = Dict[State, Dist]  # policy is a mapping from state to action distribution
 DeterministicPolicy = Dict[State, Action]  # deterministic policy is a mapping from state to action
-Subgoal = int
 Trajectory = List[State]
 
 
